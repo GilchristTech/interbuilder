@@ -1,0 +1,690 @@
+package interbuilder
+
+import (
+  "log"
+  "fmt"
+  "sync"
+  "time"
+  "net/url"
+  "strings"
+  "os"
+  "path/filepath"
+  "path"
+
+  "io"
+)
+
+
+type SpecProps map[string]any
+
+/*
+  A Spec represents a node in a tree of concurrent user-defined
+  operations which pass their output to their parents. They can
+  be built using a JSON-like structure, and pass parsing rules
+  (SpecResolvers) of that structure to their children, with
+  parental rules being executed before child rules. Also, they
+  have a namespacing and metadata-matching system (TaskResolvers)
+  for determining which tasks to run, with child task resolvers
+  taking precedence over those in the Spec parental chain.
+*/
+type Spec struct {
+  Name            string
+  Url             *url.URL
+  History         HistoryEntry
+
+  Parent          *Spec
+  Root            *Spec
+  Subspecs        map[string]*Spec
+
+  Outputs         []*Spec
+  Input           chan AssetsGetter
+  InputGroup      sync.WaitGroup
+  input_lock      sync.Mutex
+
+  SpecResolvers   []SpecResolver
+  Props           SpecProps
+
+  TaskResolvers   *TaskResolver
+
+  Tasks                *Task
+  CurrentTask          *Task
+  tasks_enqueue_end    *Task
+  tasks_push_queue     *Task
+  tasks_push_end       *Task
+
+  task_queue_lock sync.Mutex
+}
+
+  
+type Asset struct {
+  Url             *url.URL
+  History         *HistoryEntry
+  Spec            *Spec
+
+  MimeType        string
+  Data            any
+
+  // IO handling
+  //
+  Size            int
+  CanRead         bool
+  was_read        bool
+  content_bytes   *[]byte
+  content_string  string
+  reader          io.Reader
+  filesystem_path string
+}
+
+
+
+type AssetsGetter interface {
+  Assets () []*Asset
+}
+
+// Implement AssetsGetter
+func (a *Asset) Assets () []*Asset {
+  return [] *Asset { a }
+}
+
+
+type HistoryEntry struct {
+  Url     *url.URL
+  Parents []*HistoryEntry
+  Time    time.Time
+}
+
+
+type SpecResolver func (*Spec) error
+
+func NewSpec (name string, spec_url *url.URL) *Spec {
+  if spec_url == nil {
+    spec_url = &url.URL { Scheme: "interbuilder", Host: name }
+  }
+
+  spec := Spec {
+    Name:          name,
+    Url:           spec_url,
+    History:       HistoryEntry { Url: spec_url },
+    Subspecs:      make(map[string]*Spec),
+    Outputs:       make([]*Spec, 0),
+    Input:         make(chan AssetsGetter),
+    SpecResolvers: make([]SpecResolver, 0),
+    Props:         make(SpecProps),
+  }
+
+  spec.Root = &spec
+
+  return &spec
+}
+
+
+func (s *Spec) MakeUrl (paths ...string) *url.URL {
+  return s.Url.JoinPath(paths...)
+}
+
+
+func (s *Spec) Resolve () error {
+  return s.ResolveOther(s)
+}
+
+
+func (s *Spec) ResolveOther (o *Spec) error {
+  if s.Parent != nil {
+    if err := s.Parent.ResolveOther(o); err != nil {
+      return err
+    }
+  }
+
+  for _, resolver := range s.SpecResolvers {
+    if err := resolver(o); err != nil {
+      return err
+    }
+  }
+
+  return nil
+}
+
+
+func (s *Spec) InheritProp (key string) (val any, found bool) {
+  if val, found = s.Props[key] ; found {
+    return val, found
+  }
+
+  if s.Parent == nil {
+    return nil, false
+  }
+
+  return s.Parent.InheritProp(key)
+}
+
+
+func (s *Spec) InheritPropString (key string) (value string, ok, found bool) {
+  value_any, found := s.InheritProp(key)
+  value,     ok     = value_any.(string)
+  return value, ok, found
+}
+
+
+func (s *Spec) GetProp (key string) (value any, found bool) {
+  if value, found := s.Props[key] ; found {
+    return value, found
+  }
+  return nil, false
+}
+
+
+func (s *Spec) GetPropString (key string) (value string, ok, found bool) {
+  value_any, found := s.Props[key]
+  value,     ok     = value_any.(string)
+  return value, ok, found
+}
+
+
+func (s *Spec) RequireProp (key string) (value any, err error) {
+  value, found := s.Props[key]
+
+  if !found {
+    return nil, fmt.Errorf(
+      "Spec %s requires spec prop %s to exist",
+      s.Name, key,
+    )
+  }
+
+  return value, nil
+}
+
+
+func (s *Spec) RequirePropString (key string) (string, error) {
+  value_any, err := s.RequireProp(key)
+  if err != nil {
+    return "", err
+  }
+
+  value, ok := value_any.(string)
+  if !ok {
+    return "", fmt.Errorf(
+      "Spec %s requires spec prop %s to be a string, got %T",
+      s.Name, key, s.Props[key],
+    )
+  }
+
+  return value, nil
+}
+
+
+func (s *Spec) GetPropJson (key string) (value map[string]any, ok, found bool) {
+  value_any, found := s.Props[key]
+  value,     ok     = value_any.(map[string]any)
+  return value, ok, found
+}
+
+
+func (s *Spec) AddSpecResolver (r SpecResolver) {
+  s.SpecResolvers = append(s.SpecResolvers, r)
+}
+
+
+func (s *Spec) AddSubspec (a *Spec) *Spec {
+  s.Subspecs[a.Name] = a
+  a.Parent = s
+  a.Root = s.Root
+  a.AddOutput(s)
+
+  return a
+}
+
+
+func (s *Spec) AddOutput (o *Spec) {
+  s.Outputs = append(s.Outputs, o)
+  o.InputGroup.Add(1)
+}
+
+
+func (s *Spec) GetTaskResolverById (id string) *TaskResolver {
+  for tr := s.TaskResolvers ; tr != nil ; tr = tr.Next {
+    if r := tr.GetTaskResolverById(id); r != nil {
+      return r
+    }
+  }
+
+  if s.Parent == nil {
+    return nil
+  }
+
+  return s.Parent.GetTaskResolverById(id)
+}
+
+
+func (s *Spec) AddTaskResolver (tr *TaskResolver) {
+  var end *TaskResolver
+  for end = tr ; end.Next != nil ; end = end.Next {}
+  end.Next = s.TaskResolvers
+  s.TaskResolvers = tr
+}
+
+
+func (s *Spec) GetTask (name string, spec *Spec) (*Task, error) {
+  for resolver := s.TaskResolvers ; resolver != nil ; resolver = resolver.Next {
+    task, err := resolver.GetTask(name, spec)
+    if err != nil {
+      return nil, err
+    }
+    if task != nil {
+      task.Spec = s
+      return task, nil
+    }
+  }
+
+  if s.Parent == nil {
+    return nil, nil
+  }
+
+  task, err := s.Parent.GetTask(name, spec)
+  if err != nil {
+    return nil, err
+  }
+
+  if task != nil {
+    task.Spec = s
+  }
+  return task, nil
+}
+
+
+/*
+  Insert a task into the task queue, before deferred tasks.
+  Enqueued tasks are executed in first-in, first-out order, like
+  a queue. Return the final inserted item.
+*/
+func (s *Spec) EnqueueTask (t *Task) *Task {
+  s.task_queue_lock.Lock()
+  defer s.task_queue_lock.Unlock()
+
+  end := t.End()
+
+  if s.Tasks == nil {
+    s.Tasks = t
+    s.tasks_enqueue_end = t
+    return end
+  }
+
+  if s.tasks_enqueue_end == nil {
+    end.Next = s.Tasks
+    s.Tasks = t
+    s.tasks_enqueue_end = end
+    return end
+  }
+
+  s.tasks_enqueue_end = s.tasks_enqueue_end.insertRange(t, end)
+  return end
+}
+
+
+func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) *Task {
+  var task = Task {
+    Spec: s,
+    Name: name,
+    Func: f,
+  }
+
+  return s.EnqueueTask(&task)
+}
+
+
+/*
+  Insert a task into the task queue, directly after the end of
+  the enqueue end point. These tasks are executed in first-in,
+  last-out order relative to other tasks in the queue, but if
+  multiple tasks are inserted their order is maintained. Return
+  the final inserted item.
+*/
+func (s *Spec) DeferTask (t *Task) *Task {
+  s.task_queue_lock.Lock()
+  defer s.task_queue_lock.Unlock()
+
+  end := t.End()
+
+  if s.Tasks == nil {
+    s.Tasks = t
+    s.tasks_enqueue_end = nil
+    return end
+  }
+
+  if s.tasks_enqueue_end == nil {
+    s.tasks_enqueue_end = s.Tasks.End()
+  }
+
+  return s.tasks_enqueue_end.insertRange(t, end)
+}
+
+
+/*
+  Push a Task into the push queue. In the task execution loop,
+  before items are executed, tasks in the push queue are flushed
+  and inserted into the main task queue to be executed before
+  other tasks. In this sense, the main task queue executes like a
+  stack rather than a queue. Return the final inserted item.
+*/
+func (s *Spec) PushTask (t *Task) *Task {
+  end := t.End()
+
+  if s.tasks_push_queue == nil || s.tasks_push_end == nil {
+    s.tasks_push_queue = t
+    s.tasks_push_end   = end
+    return end
+  }
+
+  s.tasks_push_end = s.tasks_push_end.insertRange(t, end)
+  return end
+}
+
+
+func (s *Spec) EnqueueTaskName (name string) (*Task, error) {
+  task, err := s.GetTask(name, s)
+  if task == nil || err != nil {
+    return nil, err
+  }
+  return s.EnqueueTask(task), nil
+}
+
+
+func (s *Spec) EnqueueUniqueTaskName (name string) (*Task, error) {
+  existing_task := s.GetTaskFromQueue(name)
+  if existing_task != nil {
+    return existing_task, nil
+  }
+  return s.EnqueueTaskName(name)
+}
+
+
+func (s *Spec) GetTaskFromQueue (name string) *Task {
+  for task := s.Tasks ; task != nil ; task = task.Next {
+    if task.Name == name {
+      return task
+    }
+  }
+  return nil
+}
+
+
+func (s *Spec) flushTaskPushQueue () *Task {
+  start := s.tasks_push_queue
+  end   := s.tasks_push_end
+
+  s.tasks_push_queue = nil
+  s.tasks_push_end   = nil
+
+  if start == nil || end == nil {
+    return nil
+  }
+
+  // If the current task has not been defined,
+  // flush to the top of the task queue.
+  //
+  if s.CurrentTask == nil {
+    if s.Tasks == nil {
+      s.Tasks = start
+      s.tasks_enqueue_end = end
+      return end
+    }
+
+    end.Next = s.Tasks
+    s.Tasks = start
+    return end
+  }
+
+  return s.CurrentTask.insertRange(start, end)
+}
+
+
+func (s *Spec) Run () error {
+  // TODO: print message verbosity settings; these should not print during tests
+  fmt.Printf("[%s] Running\n", s.Name)
+  defer fmt.Printf("[%s] Exit\n", s.Name)
+
+  //
+  // Run subspecs in parallel goroutines
+  //
+  var wg sync.WaitGroup
+  wg.Add(len(s.Subspecs))
+
+  for _, subspec := range s.Subspecs {
+    go func () {
+      // TODO: give subspecs a quit signal
+      err := subspec.Run()
+      if err != nil {
+        // TODO: terminate this spec (this, being that of s.Run)
+      }
+
+      wg.Done()
+    }()
+  }
+
+  go func () {
+    wg.Wait()
+    close(s.Input)
+  }()
+
+  //
+  // Main task queue loop
+  //
+  s.task_queue_lock.Lock()
+  s.flushTaskPushQueue()
+  var task *Task = s.Tasks
+  s.CurrentTask = task
+  s.task_queue_lock.Unlock()
+
+  for task != nil {
+    // Assert a valid task queue, going forward
+    //
+    if t := s.Tasks.GetCircularTask(); t != nil {
+      log.Fatalf(
+        "[%s] Error: repeating (circular) task entry in task list: %s\n",
+        s.Name, t.ResolverId,
+      )
+    }
+
+    // Run the task
+    //
+    fmt.Printf("[%s] task: %s (%s)\n", s.Name, task.Name, task.ResolverId)
+    if err := task.Run(s); err != nil {
+      fmt.Printf(
+        "[%s/%s] Error in task %s (%s):\n%s\n",
+        s.Name, task.Name,
+        task.ResolverId,
+        s.Name, err,
+      )
+      return err
+    }
+
+    // Flush the push queue and advance to the next task
+    // TODO: if a quit signal is sent, skip to the deferred portion of the task queue.
+    //
+    s.task_queue_lock.Lock()
+    s.flushTaskPushQueue()
+    task          = task.Next
+    s.CurrentTask = task
+    s.task_queue_lock.Unlock()
+  }
+
+  // Emit any remaining assets
+  //
+  for assets := range s.Input {
+    err := s.EmitAssets(assets)
+    if err != nil { return err }
+  }
+
+  wg.Wait()
+
+  return nil
+}
+
+
+func PrintSpec (s *Spec, level int) {
+  tab     := "  "
+  align_0 := strings.Repeat(tab, level)
+  align_1 := align_0 + tab
+  align_2 := align_1 + tab
+
+  fmt.Print(align_0, s.Url, "\n")
+
+  // Properties
+  //
+  if len(s.Props) > 0 {
+    fmt.Print(align_1, "Properties:\n")
+    for key, value := range s.Props {
+      fmt.Printf("%s%s  \t%T  \t%s\n", align_2, key, value, value)
+    }
+  }
+
+  // Tasks
+  //
+  task_pointers := make(map[*Task]bool)
+  heading_printed := false
+
+  for task := s.Tasks ; task != nil ; task = task.Next {
+    if heading_printed == false {
+      fmt.Print(align_1, "Tasks:\n")
+      heading_printed = true
+    }
+    bullet := "-"
+    if task.Started {
+      bullet = ">"
+    }
+
+    // Check for task uniqueness and terminate circular task lists
+    //
+    _, found := task_pointers[task]
+    if found {
+      fmt.Printf("%s%s %s (%s)  WARNING: circular task list\n", align_2, bullet, task.Name, task.ResolverId)
+      break
+    }
+    task_pointers[task] = true
+
+    fmt.Printf("%s%s %s (%s)\n", align_2, bullet, task.Name, task.ResolverId)
+  }
+
+  // Subspecs
+  //
+  if len(s.Subspecs) > 0 {
+    fmt.Print(align_1, "Subspecs:\n")
+    for _, subspec := range s.Subspecs {
+      PrintSpec(subspec, level+2)
+    }
+  }
+}
+
+
+/*
+  For a given filesystem path, relative to the source_dir
+  property, return whether that path exists; as well as any error
+  in determing this.
+*/
+func (s *Spec) PathExists (local_path string) (bool, error) {
+  spec_source, err := s.RequirePropString("source_dir")
+  if err != nil { return false, err }
+
+  abs_path, err := filepath.Abs(path.Join(spec_source, local_path))
+  if err != nil { return false, err }
+
+  _, err = os.Stat(abs_path)
+  if err != nil {
+    if os.IsNotExist(err) {
+      return false, nil
+    }
+    return false, err
+  }
+
+  return true, nil
+}
+
+
+/*
+  Given a filesystem path inside the Spec's source_dir, return
+  the relative path to the source_dir. Errors if the path is not
+  within the Spec's source_dir.
+*/
+func (s *Spec) GetPathKey (p string) (string, error) {
+  spec_source, err := s.RequirePropString("source_dir")
+  if err != nil { return "", err }
+  return filepath.Rel(spec_source, p)
+}
+
+
+/*
+  Convert a Spec Asset key into a filesystem path.
+*/
+func (s *Spec) GetKeyPath (k string) (string, error) {
+  spec_source, err := s.RequirePropString("source_dir")
+  if err != nil { return "", err }
+
+  if os.PathSeparator != '/' {
+    k = strings.ReplaceAll(k, "/", string(os.PathSeparator))
+  }
+
+  return filepath.Join(spec_source, k), nil
+}
+
+
+func (s *Spec) EmitAsset (a *Asset) error {
+  for _, output := range s.Outputs {
+    output.Input <- a
+  }
+  return nil
+}
+
+
+func (s *Spec) EmitAssets (ag AssetsGetter) error {
+  for _, output := range s.Outputs {
+    output.Input <- ag
+  }
+  return nil
+}
+
+
+func (s *Spec) EmitFileKey (key string) error {
+  asset, err := s.MakeFileKeyAsset(key)
+  if err != nil { return err }
+
+  for _, output := range s.Outputs {
+    output.Input <- asset
+  }
+
+  return nil
+}
+
+
+func (s *Spec) MakeFileKeyAsset (key string) (*Asset, error) {
+  source_dir, err := s.RequirePropString("source_dir")
+  if err != nil { return nil, err }
+
+  file_path := filepath.Join(source_dir, key)
+
+  var mimetype string = ""
+
+  file_info, err := os.Stat(file_path)
+  if err != nil { return nil, err }
+
+  if file_info.IsDir() {
+    mimetype = "inode/directory"
+  }
+
+  var asset_url *url.URL = s.MakeUrl("emit", key)
+
+  var history = HistoryEntry {
+    Url:     asset_url,
+    Parents: [] *HistoryEntry { &s.History },
+    Time:    time.Now(),
+  }
+
+  var asset = Asset {
+    Url:      asset_url,
+    History:  & history,
+    Spec:     s,
+    MimeType: mimetype,
+    Size:     -1,
+    CanRead:  false,
+  }
+  
+  return &asset, nil
+}

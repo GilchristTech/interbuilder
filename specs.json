@@ -1,0 +1,16 @@
+{
+  "name": "root",
+  "source_nest": "build",
+
+  "subspecs": {
+    "imposition": {
+      "source": "git://github.com/GilchristTech/web-imposition",
+      "install_cmd": "npm i",
+      "href_prefix": "imposition/"
+    },
+    "comic": {
+      "source": "git://github.com/GilchristTech/spacehouse-website",
+      "href_prefix": "comic/"
+    }
+  }
+}
