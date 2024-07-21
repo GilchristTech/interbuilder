@@ -36,10 +36,11 @@ type Spec struct {
   Root            *Spec
   Subspecs        map[string]*Spec
 
-  Outputs         []*Spec
+  OutputChannels  [] *chan AssetsGetter
+  OutputGroups    [] *sync.WaitGroup
+
   Input           chan AssetsGetter
   InputGroup      sync.WaitGroup
-  input_lock      sync.Mutex
 
   SpecResolvers   []SpecResolver
   Props           SpecProps
@@ -102,14 +103,15 @@ func NewSpec (name string, spec_url *url.URL) *Spec {
   }
 
   spec := Spec {
-    Name:          name,
-    Url:           spec_url,
-    History:       HistoryEntry { Url: spec_url },
-    Subspecs:      make(map[string]*Spec),
-    Outputs:       make([]*Spec, 0),
-    Input:         make(chan AssetsGetter),
-    SpecResolvers: make([]SpecResolver, 0),
-    Props:         make(SpecProps),
+    Name:            name,
+    Url:             spec_url,
+    History:         HistoryEntry { Url: spec_url },
+    Subspecs:        make(map[string]*Spec),
+    OutputChannels:  make([] *chan AssetsGetter, 0),
+    OutputGroups:    make([] *sync.WaitGroup, 0),
+    Input:           make(chan AssetsGetter),
+    SpecResolvers:   make([]SpecResolver, 0),
+    Props:           make(SpecProps),
   }
 
   spec.Root = &spec
@@ -228,15 +230,26 @@ func (s *Spec) AddSubspec (a *Spec) *Spec {
   s.Subspecs[a.Name] = a
   a.Parent = s
   a.Root = s.Root
-  a.AddOutput(s)
+  a.AddOutputSpec(s)
 
   return a
 }
 
 
-func (s *Spec) AddOutput (o *Spec) {
-  s.Outputs = append(s.Outputs, o)
-  o.InputGroup.Add(1)
+func (s *Spec) AddOutput (ch *chan AssetsGetter, wg *sync.WaitGroup) {
+  if ch != nil {
+    s.OutputChannels = append(s.OutputChannels, ch)
+  }
+
+  if wg != nil {
+    s.OutputGroups = append(s.OutputGroups, wg)
+    wg.Add(1)
+  }
+}
+
+
+func (s *Spec) AddOutputSpec (o *Spec) {
+  s.AddOutput(&o.Input, &o.InputGroup)
 }
 
 
@@ -437,17 +450,21 @@ func (s *Spec) flushTaskPushQueue () *Task {
 }
 
 
+func (s *Spec) Done () {
+  for _, output_group := range s.OutputGroups {
+    output_group.Done()
+  }
+}
+
 func (s *Spec) Run () error {
   // TODO: print message verbosity settings; these should not print during tests
   fmt.Printf("[%s] Running\n", s.Name)
   defer fmt.Printf("[%s] Exit\n", s.Name)
+  defer s.Done()
 
   //
   // Run subspecs in parallel goroutines
   //
-  var wg sync.WaitGroup
-  wg.Add(len(s.Subspecs))
-
   for _, subspec := range s.Subspecs {
     go func () {
       // TODO: give subspecs a quit signal
@@ -455,13 +472,14 @@ func (s *Spec) Run () error {
       if err != nil {
         // TODO: terminate this spec (this, being that of s.Run)
       }
-
-      wg.Done()
     }()
   }
 
+  // When all subspecs have finished running, close this spec's
+  // input channel.
+  //
   go func () {
-    wg.Wait()
+    s.InputGroup.Wait()
     close(s.Input)
   }()
 
@@ -513,8 +531,12 @@ func (s *Spec) Run () error {
     err := s.EmitAssets(assets)
     if err != nil { return err }
   }
-
-  wg.Wait()
+  
+  // For the above range to finish, s.Input must be closed. This
+  // function runs a goroutine which waits for the subspecs to
+  // finish executing before closing the input channel, which
+  // means that for execution to get to this point,
+  // s.InputGroup.Wait() has been called and finished.
 
   return nil
 }
@@ -627,16 +649,16 @@ func (s *Spec) GetKeyPath (k string) (string, error) {
 
 
 func (s *Spec) EmitAsset (a *Asset) error {
-  for _, output := range s.Outputs {
-    output.Input <- a
+  for _, output := range s.OutputChannels {
+    (*output) <- a
   }
   return nil
 }
 
 
 func (s *Spec) EmitAssets (ag AssetsGetter) error {
-  for _, output := range s.Outputs {
-    output.Input <- ag
+  for _, output := range s.OutputChannels {
+    (*output) <- ag
   }
   return nil
 }
@@ -646,8 +668,8 @@ func (s *Spec) EmitFileKey (key string) error {
   asset, err := s.MakeFileKeyAsset(key)
   if err != nil { return err }
 
-  for _, output := range s.Outputs {
-    output.Input <- asset
+  for _, output := range s.OutputChannels {
+    (*output) <- asset
   }
 
   return nil
