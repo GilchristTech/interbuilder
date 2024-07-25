@@ -9,8 +9,7 @@ $(CMD): $(CMD_SRC) $(MODULE_SRC)
 
 .PHONY: all build cli run clean watch test test-watch
 
-all: $(CMD)
-
+all:   $(CMD)
 build: $(CMD)
 cli:   $(CMD)
 
@@ -20,11 +19,11 @@ clean:
 test: $(MODULE_SRC)
 	go test $(TEST_ARGS)
 test-watch:
-	$(WATCHER) 'make test || exit 1'
+	$(WATCHER) 'make && make test || exit 1'
 
 # TODO: remove. These build targets are temporary; The main build target is a CLI tool which requires arguments.
 # TODO: with these build targets being temporary, so is the specs.json which the current main function reads from
 run: $(CMD)
 	./$(CMD)
-watch:
+run-watch:
 	$(WATCHER) 'make && make run || exit 1'

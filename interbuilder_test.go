@@ -2,11 +2,7 @@ package interbuilder
 
 import (
   "testing"
-  "time"
 )
-
-
-var TIMEOUT time.Duration = time.Second
 
 
 func TestSpecEnqueueTaskIsNotCircular (t *testing.T) {
@@ -46,46 +42,6 @@ func TestSpecDeferTaskIsNotCircular (t *testing.T) {
 
   if spec_enqueue_defer.Tasks.GetCircularTask() != nil {
     t.Fatal("Task list is circular")
-  }
-}
-
-
-func wrapTimeout (t *testing.T, f func ()) {
-  timeout := time.After(TIMEOUT)
-  done    := make(chan bool)
-
-  go func () {
-    f()
-    done <- true
-  }()
-
-  select {
-  case <- timeout:
-    t.Fatal("Exceeded timeout")
-  case <- done:
-    // NO-OP
-  }
-}
-
-
-func wrapTimeoutError (t *testing.T, f func () error) {
-  timeout := time.After(TIMEOUT)
-  done    := make(chan bool)
-
-  go func () {
-    err := f()
-    done <- true
-
-    if err != nil {
-      t.Fatal("Function exited with error: ", err)
-    }
-  }()
-
-  select {
-  case <- timeout:
-    t.Fatal("Exceeded timeout")
-  case <- done:
-    // NO-OP
   }
 }
 

@@ -4,18 +4,13 @@ import (
   "log"
   "fmt"
   "sync"
-  "time"
   "net/url"
   "strings"
-  "os"
-  "path/filepath"
-  "path"
-
-  "io"
 )
 
 
 type SpecProps map[string]any
+
 
 /*
   A Spec represents a node in a tree of concurrent user-defined
@@ -28,18 +23,18 @@ type SpecProps map[string]any
   taking precedence over those in the Spec parental chain.
 */
 type Spec struct {
-  Name            string
-  Url             *url.URL
-  History         HistoryEntry
+  Name      string
+  Url       *url.URL
+  History   HistoryEntry
 
-  Parent          *Spec
-  Root            *Spec
-  Subspecs        map[string]*Spec
+  Parent    *Spec
+  Root      *Spec
+  Subspecs  map[string]*Spec
 
-  OutputChannels  [] *chan AssetsGetter
+  OutputChannels  [] *chan *Asset
   OutputGroups    [] *sync.WaitGroup
 
-  Input           chan AssetsGetter
+  Input           chan *Asset
   InputGroup      sync.WaitGroup
 
   SpecResolvers   []SpecResolver
@@ -47,51 +42,12 @@ type Spec struct {
 
   TaskResolvers   *TaskResolver
 
-  Tasks                *Task
-  CurrentTask          *Task
-  tasks_enqueue_end    *Task
-  tasks_push_queue     *Task
-  tasks_push_end       *Task
-
-  task_queue_lock sync.Mutex
-}
-
-  
-type Asset struct {
-  Url             *url.URL
-  History         *HistoryEntry
-  Spec            *Spec
-
-  MimeType        string
-  Data            any
-
-  // IO handling
-  //
-  Size            int
-  CanRead         bool
-  was_read        bool
-  content_bytes   *[]byte
-  content_string  string
-  reader          io.Reader
-  filesystem_path string
-}
-
-
-
-type AssetsGetter interface {
-  Assets () []*Asset
-}
-
-// Implement AssetsGetter
-func (a *Asset) Assets () []*Asset {
-  return [] *Asset { a }
-}
-
-
-type HistoryEntry struct {
-  Url     *url.URL
-  Parents []*HistoryEntry
-  Time    time.Time
+  Tasks              *Task
+  CurrentTask        *Task
+  tasks_enqueue_end  *Task
+  tasks_push_queue   *Task
+  tasks_push_end     *Task
+  task_queue_lock    sync.Mutex
 }
 
 
@@ -99,19 +55,19 @@ type SpecResolver func (*Spec) error
 
 func NewSpec (name string, spec_url *url.URL) *Spec {
   if spec_url == nil {
-    spec_url = &url.URL { Scheme: "interbuilder", Host: name }
+    spec_url = &url.URL { Scheme: "ib", Host: name }
   }
 
   spec := Spec {
     Name:            name,
     Url:             spec_url,
-    History:         HistoryEntry { Url: spec_url },
-    Subspecs:        make(map[string]*Spec),
-    OutputChannels:  make([] *chan AssetsGetter, 0),
-    OutputGroups:    make([] *sync.WaitGroup, 0),
-    Input:           make(chan AssetsGetter),
-    SpecResolvers:   make([]SpecResolver, 0),
-    Props:           make(SpecProps),
+    History:         HistoryEntry { Url: spec_url  },
+    Subspecs:        make( map[string]*Spec        ),
+    OutputChannels:  make( [] *chan *Asset,       0),
+    OutputGroups:    make( [] *sync.WaitGroup,    0),
+    Input:           make( chan *Asset             ),
+    SpecResolvers:   make( [] SpecResolver,       0),
+    Props:           make( SpecProps               ),
   }
 
   spec.Root = &spec
@@ -236,7 +192,7 @@ func (s *Spec) AddSubspec (a *Spec) *Spec {
 }
 
 
-func (s *Spec) AddOutput (ch *chan AssetsGetter, wg *sync.WaitGroup) {
+func (s *Spec) AddOutput (ch *chan *Asset, wg *sync.WaitGroup) {
   if ch != nil {
     s.OutputChannels = append(s.OutputChannels, ch)
   }
@@ -527,8 +483,8 @@ func (s *Spec) Run () error {
 
   // Emit any remaining assets
   //
-  for assets := range s.Input {
-    err := s.EmitAssets(assets)
+  for asset := range s.Input {
+    err := s.EmitAsset(asset)
     if err != nil { return err }
   }
   
@@ -594,119 +550,4 @@ func PrintSpec (s *Spec, level int) {
       PrintSpec(subspec, level+2)
     }
   }
-}
-
-
-/*
-  For a given filesystem path, relative to the source_dir
-  property, return whether that path exists; as well as any error
-  in determing this.
-*/
-func (s *Spec) PathExists (local_path string) (bool, error) {
-  spec_source, err := s.RequirePropString("source_dir")
-  if err != nil { return false, err }
-
-  abs_path, err := filepath.Abs(path.Join(spec_source, local_path))
-  if err != nil { return false, err }
-
-  _, err = os.Stat(abs_path)
-  if err != nil {
-    if os.IsNotExist(err) {
-      return false, nil
-    }
-    return false, err
-  }
-
-  return true, nil
-}
-
-
-/*
-  Given a filesystem path inside the Spec's source_dir, return
-  the relative path to the source_dir. Errors if the path is not
-  within the Spec's source_dir.
-*/
-func (s *Spec) GetPathKey (p string) (string, error) {
-  spec_source, err := s.RequirePropString("source_dir")
-  if err != nil { return "", err }
-  return filepath.Rel(spec_source, p)
-}
-
-
-/*
-  Convert a Spec Asset key into a filesystem path.
-*/
-func (s *Spec) GetKeyPath (k string) (string, error) {
-  spec_source, err := s.RequirePropString("source_dir")
-  if err != nil { return "", err }
-
-  if os.PathSeparator != '/' {
-    k = strings.ReplaceAll(k, "/", string(os.PathSeparator))
-  }
-
-  return filepath.Join(spec_source, k), nil
-}
-
-
-func (s *Spec) EmitAsset (a *Asset) error {
-  for _, output := range s.OutputChannels {
-    (*output) <- a
-  }
-  return nil
-}
-
-
-func (s *Spec) EmitAssets (ag AssetsGetter) error {
-  for _, output := range s.OutputChannels {
-    (*output) <- ag
-  }
-  return nil
-}
-
-
-func (s *Spec) EmitFileKey (key string) error {
-  asset, err := s.MakeFileKeyAsset(key)
-  if err != nil { return err }
-
-  for _, output := range s.OutputChannels {
-    (*output) <- asset
-  }
-
-  return nil
-}
-
-
-func (s *Spec) MakeFileKeyAsset (key string) (*Asset, error) {
-  source_dir, err := s.RequirePropString("source_dir")
-  if err != nil { return nil, err }
-
-  file_path := filepath.Join(source_dir, key)
-
-  var mimetype string = ""
-
-  file_info, err := os.Stat(file_path)
-  if err != nil { return nil, err }
-
-  if file_info.IsDir() {
-    mimetype = "inode/directory"
-  }
-
-  var asset_url *url.URL = s.MakeUrl("emit", key)
-
-  var history = HistoryEntry {
-    Url:     asset_url,
-    Parents: [] *HistoryEntry { &s.History },
-    Time:    time.Now(),
-  }
-
-  var asset = Asset {
-    Url:      asset_url,
-    History:  & history,
-    Spec:     s,
-    MimeType: mimetype,
-    Size:     -1,
-    CanRead:  false,
-  }
-  
-  return &asset, nil
 }

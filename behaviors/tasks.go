@@ -122,25 +122,41 @@ var TaskResolverSourceBuildNodeJS = TaskResolver {
 
 
 func TaskSourceBuildNodeJS (s *Spec, t *Task) error {
-  // Run build command
-  //
-  _, err := t.CommandRun("npm", "run", "build")
-  if err != nil { return err }
-
-  // Emit output
-  // TODO: break this up into its own task
+  // Check if build path already exists and emit it, if so
   //
   exists, err := s.PathExists("dist")
   if err != nil { return err }
   if exists {
-    s.EmitFileKey("dist")
+    s.EmitFileKey("dist", "/")
     return nil
   }
 
   exists, err = s.PathExists("build")
   if err != nil { return err }
   if exists {
-    s.EmitFileKey("build")
+    s.EmitFileKey("build", "/")
+    return nil
+  }
+
+  // Run build command
+  //
+  _, err = t.CommandRun("npm", "run", "build")
+  if err != nil { return err }
+
+  // Emit output
+  // TODO: break this up into its own task
+  //
+  exists, err = s.PathExists("dist")
+  if err != nil { return err }
+  if exists {
+    s.EmitFileKey("dist", "/")
+    return nil
+  }
+
+  exists, err = s.PathExists("build")
+  if err != nil { return err }
+  if exists {
+    s.EmitFileKey("build", "/")
     return nil
   }
 
