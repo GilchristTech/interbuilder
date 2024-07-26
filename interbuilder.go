@@ -131,6 +131,20 @@ func (s *Spec) GetProp (key string) (value any, found bool) {
 }
 
 
+func (s *Spec) GetPropBool (key string) (value bool, ok, found bool) {
+  value_any, found := s.Props[key]
+  value,     ok     = value_any.(bool)
+  return value, ok, found
+}
+
+
+func (s *Spec) InheritPropBool (key string) (value bool, ok, found bool) {
+  value_any, found := s.InheritProp(key)
+  value,     ok     = value_any.(bool)
+  return value, ok, found
+}
+
+
 func (s *Spec) GetPropString (key string) (value string, ok, found bool) {
   value_any, found := s.Props[key]
   value,     ok     = value_any.(string)
@@ -412,10 +426,20 @@ func (s *Spec) Done () {
   }
 }
 
+
+func (s *Spec) Printf (format string, a ...any) (n int, err error) {
+  if quiet, _, _ := s.InheritPropBool("quiet"); quiet {
+    return 0, nil
+  }
+
+  return fmt.Printf(format, a...)
+}
+
+
 func (s *Spec) Run () error {
   // TODO: print message verbosity settings; these should not print during tests
-  fmt.Printf("[%s] Running\n", s.Name)
-  defer fmt.Printf("[%s] Exit\n", s.Name)
+  s.Printf("[%s] Running\n", s.Name)
+  defer s.Printf("[%s] Exit\n", s.Name)
   defer s.Done()
 
   //
@@ -460,9 +484,9 @@ func (s *Spec) Run () error {
 
     // Run the task
     //
-    fmt.Printf("[%s] task: %s (%s)\n", s.Name, task.Name, task.ResolverId)
+    s.Printf("[%s] task: %s (%s)\n", s.Name, task.Name, task.ResolverId)
     if err := task.Run(s); err != nil {
-      fmt.Printf(
+      s.Printf(
         "[%s/%s] Error in task %s (%s):\n%s\n",
         s.Name, task.Name,
         task.ResolverId,

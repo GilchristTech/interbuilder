@@ -7,6 +7,7 @@ import (
 
 func TestSpecEnqueueTaskIsNotCircular (t *testing.T) {
   spec := NewSpec("test", nil)
+  spec.Props["quiet"] = true
 
   spec.EnqueueTask( & Task { Name: "Task1" } )
   spec.EnqueueTask( & Task { Name: "Task2" } )
@@ -22,6 +23,7 @@ func TestSpecDeferTaskIsNotCircular (t *testing.T) {
     Spec with only deferred tasks
   */
   spec_defer := NewSpec("defer-test", nil)
+  spec_defer.Props["quiet"] = true
 
   spec_defer.DeferTask( & Task { Name: "Defer1" } )
   spec_defer.DeferTask( & Task { Name: "Defer2" } )
@@ -48,12 +50,14 @@ func TestSpecDeferTaskIsNotCircular (t *testing.T) {
 
 func TestSpecEmptySingularRunFinishes (t *testing.T) {
   spec := NewSpec("single", nil)
+  spec.Props["quiet"] = true
   wrapTimeoutError(t, spec.Run)
 }
 
 
 func TestSpecEmptySingularRunEmitFinishes (t *testing.T) {
   spec := NewSpec("single", nil)
+  spec.Props["quiet"] = true
 
   spec.EnqueueTaskFunc("test-emit", func (s *Spec, t *Task) error {
     s.EmitAsset( & Asset {} )
@@ -66,6 +70,7 @@ func TestSpecEmptySingularRunEmitFinishes (t *testing.T) {
 
 func TestSpecChildRunEmitFinishes (t *testing.T) {
   root := NewSpec("root", nil)
+  root.Props["quiet"] = true
   subspec := root.AddSubspec( NewSpec("subspec", nil ) )
 
   subspec.EnqueueTaskFunc("test-emit", func (s *Spec, t *Task) error {
@@ -81,6 +86,8 @@ func TestSpecTreeRunEmitFinishes (t *testing.T) {
   root      := NewSpec("root", nil)
   subspec_a := root.AddSubspec( NewSpec("subspec_a", nil ) )
   subspec_b := root.AddSubspec( NewSpec("subspec_b", nil ) )
+
+  root.Props["quiet"] = true
 
   subspec_a.EnqueueTaskFunc("test-emit", func (s *Spec, t *Task) error {
     s.EmitAsset( & Asset {} )
@@ -99,6 +106,8 @@ func TestSpecTreeRunEmitFinishes (t *testing.T) {
 func TestSpecChildRunEmitConsumesAssetFinishes (t *testing.T) {
   root    := NewSpec("root", nil)
   subspec := root.AddSubspec( NewSpec("subspec", nil ) )
+
+  root.Props["quiet"] = true
 
   subspec.EnqueueTaskFunc("test-emit", func (s *Spec, t *Task) error {
     s.EmitAsset( & Asset {} )
