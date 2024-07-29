@@ -13,20 +13,45 @@ import (
 )
 
 
-// Asset type enum
+// Asset type masks
 //
 const (
-  // Type is undefined; default to singular behavior
-  ASSET_TYPE_UNDEFINED  = 0b0000
+  /* Asset type mask bit ranges */
+  ASSET_FIELDS_QUANTITY   = 0b00_00000_1
+  ASSET_FIELDS_ACCESS     = 0b00_11111_0
+  ASSET_FIELDS_TRANSFER   = 0b11_00000_0
 
-  ASSET_TYPE_SINGULAR   = 0b0001
-  ASSET_TYPE_ARRAY      = 0b0010
-  ASSET_TYPE_ARRAY_FUNC = 0b0100
-  ASSET_TYPE_GENERATOR  = 0b1000
+  ASSET_TYPE_UNDEFINED    = 0b00_00000_0
 
-  ASSET_FIELDS_SINGULAR = 0b0001
-  ASSET_FIELDS_PLURAL   = 0b1110
+  /* Asset quantity bit: (whether asset is singular or pluralistic) */
+  ASSET_QUANTITY_SINGLE   = 0b00_00000_0
+  ASSET_QUANTITY_MULTI    = 0b00_00000_1
+
+  /* Singular asset types */
+  ASSET_SINGLE_READER     = 0b00_00001_0
+  ASSET_SINGLE_WRITER     = 0b00_00010_0
+  ASSET_SINGLE_BYTES      = 0b00_00100_0
+  ASSET_SINGLE_STRING     = 0b00_01000_0
+  ASSET_SINGLE_DATA       = 0b00_10000_0
+
+  /* Mult-asset types */
+  ASSET_MULTI_ARRAY       = 0b00_00001_1
+  ASSET_MULTI_FUNC        = 0b00_00010_1
+  ASSET_MULTI_GENERATOR   = 0b00_00100_1
+
+  /* Asset transfer modes */
+  ASSET_TRANSFER_COPY     = 0b00_00000_0
+  ASSET_TRANSFER_NONE     = 0b01_00000_0
+  ASSET_TRANSFER_MOVE     = 0b10_00000_0
+  ASSET_TRANSFER_LINK     = 0b11_00000_0
 )
+
+
+var ASSET_MULTI_TYPES = []int {
+  ASSET_MULTI_ARRAY,
+  ASSET_MULTI_FUNC,
+  ASSET_MULTI_GENERATOR,
+}
 
 
 type Asset struct {
@@ -40,8 +65,9 @@ type Asset struct {
   // IO handling
   //
   FilePath        string
+  ReadFilePath    string
+  WriteFilePath   string
   Size            int
-  CanRead         bool
   was_read        bool
   is_directory    bool
 
@@ -59,15 +85,13 @@ type Asset struct {
 
   // Asset Generator: One asset may function like a generator for
   // other assets. In order to act like a generator, an Asset can
-  // define an AssetExpander
+  // store pointers to generator functions which
   //
   generator_start   func (a *Asset) (next func () (*Asset, error), err error)
   generator_next    func () (*Asset, error)
 }
 
 
-// Implement AssetGenerator
-//
 func (a *Asset) ExtendHistory (add_parents ...*HistoryEntry) *HistoryEntry {
   parents := make([]*HistoryEntry, 0, 1+len(add_parents))
   parents  = append(parents, a.History)
@@ -230,7 +254,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     Spec:       s,
     Mimetype:   mimetype,
     Size:       -1,
-    CanRead:    false,
+    TypeMask:   ASSET_TYPE_UNDEFINED, // TODO: specify means of singular access
 
     is_directory: is_dir,
 
@@ -239,7 +263,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
 
   if is_dir {
     asset.Mimetype = "inode/directory"
-    asset.TypeMask = ASSET_TYPE_ARRAY_FUNC | ASSET_TYPE_GENERATOR
+    asset.TypeMask = ASSET_MULTI_FUNC | ASSET_MULTI_GENERATOR
 
     var keys = make([]string, 0)
     var walk_err error = nil
@@ -290,47 +314,32 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
 }
 
 
+func (a *Asset) IsSingle () bool {
+  return a.TypeMask & ASSET_FIELDS_QUANTITY == ASSET_QUANTITY_SINGLE
+}
+
+
+func (a *Asset) IsMulti () bool {
+  return a.TypeMask & ASSET_FIELDS_QUANTITY == ASSET_QUANTITY_MULTI
+}
+
+
 func (a *Asset) Expand () ([]*Asset, error) {
-  // Match TypeMasks with only one type bit (equality with the flags)
-  //
-  switch a.TypeMask {
-    case ASSET_TYPE_UNDEFINED:
-      fallthrough
-    case ASSET_TYPE_SINGULAR:
-      return []*Asset { a }, nil
-
-    case ASSET_TYPE_ARRAY:
-      return a.asset_array, nil
-    case ASSET_TYPE_ARRAY_FUNC:
-      return a.asset_array_func(a)
-    case ASSET_TYPE_GENERATOR:
-      return a.GenerateAssetsArray()
-
-    default:
-      // Multiple asset type bit flags are set, continue
-      // along the function body.
-  }
-
-  var is_singular bool = a.TypeMask & ASSET_FIELDS_SINGULAR != 0
-  var is_plural   bool = a.TypeMask & ASSET_FIELDS_PLURAL   != 0
-
-  if is_singular && is_plural {
-    return nil, fmt.Errorf("Asset type is both singular and plural")
-  }
-
-  if a.TypeMask & ASSET_TYPE_SINGULAR != 0 {
+  if a.IsSingle() {
     return []*Asset { a }, nil
   }
 
-  if a.TypeMask & ASSET_TYPE_ARRAY != 0 {
+  var access = a.TypeMask & ASSET_FIELDS_ACCESS
+
+  if access & ASSET_MULTI_ARRAY != 0 {
     return a.asset_array, nil
   }
 
-  if a.TypeMask & ASSET_TYPE_ARRAY_FUNC != 0 {
+  if access & ASSET_MULTI_FUNC != 0 {
     return a.asset_array_func(a)
   }
 
-  if a.TypeMask & ASSET_TYPE_GENERATOR != 0 {
+  if access & ASSET_MULTI_GENERATOR != 0 {
     return a.GenerateAssetsArray()
   }
 

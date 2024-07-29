@@ -10,9 +10,7 @@ import (
 func TestAssetExpandSingular (t *testing.T) {
   var testing_assets = []*Asset {
     & Asset {},
-    & Asset {
-      TypeMask: ASSET_TYPE_SINGULAR,
-    },
+    & Asset { TypeMask: ASSET_QUANTITY_SINGLE },
   }
 
   for i, asset := range testing_assets {
@@ -29,60 +27,44 @@ func TestAssetExpandSingular (t *testing.T) {
 
 
 func TestAssetExpandArray (t *testing.T) {
-  var test_url, _ = url.Parse("ib://testing")
+  var type_mask   = ASSET_MULTI_ARRAY
+  var base_url, _ = url.Parse("ib://testing/mask")
+  var test_url    = base_url.JoinPath(strconv.Itoa(type_mask))
 
-  var testing_assets = make([]*Asset, 0)
+  var asset_array = make([]*Asset, 3)
 
-  for type_mask := 0 ; type_mask <= ASSET_FIELDS_PLURAL ; type_mask++ {
-    // Only generate test multiassets through combinations of valid
-    // asset types which also include ASSET_TYPE_ARRAY
-    //
-    if type_mask & ASSET_FIELDS_SINGULAR != 0 {
-      continue
+  for i := 0 ; i < 3 ; i++ {
+    asset_array[i] = & Asset {
+      Url: base_url.JoinPath(strconv.Itoa(i)),
     }
+  }
 
-    if type_mask & ASSET_TYPE_ARRAY == 0 {
-      continue
-    }
-
-    var base_url = test_url.JoinPath(strconv.Itoa(type_mask))
-    var asset_array = make([]*Asset, 3)
-
-    for i := 0 ; i < 3 ; i++ {
-      asset_array[i] = & Asset {
-        Url: base_url.JoinPath(strconv.Itoa(i)),
-      }
-    }
-
-    testing_assets = append(testing_assets, & Asset {
-      Url:         base_url,
-      TypeMask:    type_mask,
-      asset_array: asset_array,
-    })
+  var test_asset = & Asset {
+    Url:         test_url,
+    TypeMask:    type_mask,
+    asset_array: asset_array,
   }
   
+  assets, err := test_asset.Expand()
+  if err != nil {
+    t.Fatalf("Error in asset: %s", err)
+  }
 
-  for i, asset := range testing_assets {
-    assets, err := asset.Expand()
-    if err != nil {
-      t.Fatalf("Error in asset #%d: %s", i, err)
-    }
-
-    if len(assets) != 3 {
-      t.Fatalf("Expanded assets array in asset #%d does not have a length of 3", i)
-    }
+  if len(assets) != 3 {
+    t.Fatalf("Expanded assets array in test asset does not have a length of 3, got %d", len(assets))
   }
 }
 
 
 func TestAssetExpandArrayFunc (t *testing.T) {
-  var test_url, _    = url.Parse("ib://testing")
-  var type_mask int  = ASSET_TYPE_ARRAY_FUNC
-  var base_url       = test_url.JoinPath(strconv.Itoa(type_mask))
+  var test_url, _ = url.Parse("ib://testing/mask")
+  var type_mask   = ASSET_MULTI_FUNC
+  var base_url    = test_url.JoinPath(strconv.Itoa(type_mask))
 
   var test_asset = & Asset {
-    Url:         base_url,
-    TypeMask:    type_mask,
+    Url:      base_url,
+    TypeMask: ASSET_MULTI_FUNC,
+
     asset_array_func: func (a *Asset) ([]*Asset, error) {
       var asset_array = make([]*Asset, 3)
       for i := 0 ; i < 3 ; i++ {
@@ -112,9 +94,9 @@ func TestAssetExpandGenerator (t *testing.T) {
   // doesn't terminate.
   //
   wrapTimeout(t, func () {
-    var test_url, _    = url.Parse("ib://testing")
-    var type_mask int  = ASSET_TYPE_GENERATOR
-    var base_url       = test_url.JoinPath(strconv.Itoa(type_mask))
+    var test_url, _   = url.Parse("ib://testing/mask")
+    var type_mask int = ASSET_MULTI_GENERATOR
+    var base_url      = test_url.JoinPath(strconv.Itoa(type_mask))
 
     var generator_start = func (a *Asset) (func()(*Asset, error), error) {
       var asset_array = make([]*Asset, 3)
