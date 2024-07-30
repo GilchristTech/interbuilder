@@ -17,37 +17,31 @@ import (
 //
 const (
   /* Asset type mask bit ranges */
-  ASSET_FIELDS_QUANTITY   = 0b00_00000_1
-  ASSET_FIELDS_ACCESS     = 0b00_11111_0
-  ASSET_FIELDS_TRANSFER   = 0b11_00000_0
+  ASSET_FIELDS          uint64 = 0b_11111_1
+  ASSET_FIELDS_QUANTITY uint64 = 0b_00000_1
+  ASSET_FIELDS_ACCESS   uint64 = 0b_11111_0
 
-  ASSET_TYPE_UNDEFINED    = 0b00_00000_0
+  ASSET_TYPE_UNDEFINED  uint64 = 0b_00000_0
 
   /* Asset quantity bit: (whether asset is singular or pluralistic) */
-  ASSET_QUANTITY_SINGLE   = 0b00_00000_0
-  ASSET_QUANTITY_MULTI    = 0b00_00000_1
+  ASSET_QUANTITY_SINGLE uint64 = 0b_00000_0
+  ASSET_QUANTITY_MULTI  uint64 = 0b_00000_1
 
   /* Singular asset types */
-  ASSET_SINGLE_READER     = 0b00_00001_0
-  ASSET_SINGLE_WRITER     = 0b00_00010_0
-  ASSET_SINGLE_BYTES      = 0b00_00100_0
-  ASSET_SINGLE_STRING     = 0b00_01000_0
-  ASSET_SINGLE_DATA       = 0b00_10000_0
+  ASSET_SINGLE_READER   uint64 = 0b_00001_0
+  ASSET_SINGLE_WRITER   uint64 = 0b_00010_0
+  ASSET_SINGLE_BYTES    uint64 = 0b_00100_0
+  ASSET_SINGLE_STRING   uint64 = 0b_01000_0
+  ASSET_SINGLE_DATA     uint64 = 0b_10000_0
 
   /* Mult-asset types */
-  ASSET_MULTI_ARRAY       = 0b00_00001_1
-  ASSET_MULTI_FUNC        = 0b00_00010_1
-  ASSET_MULTI_GENERATOR   = 0b00_00100_1
-
-  /* Asset transfer modes */
-  ASSET_TRANSFER_COPY     = 0b00_00000_0
-  ASSET_TRANSFER_NONE     = 0b01_00000_0
-  ASSET_TRANSFER_MOVE     = 0b10_00000_0
-  ASSET_TRANSFER_LINK     = 0b11_00000_0
+  ASSET_MULTI_ARRAY     uint64 = 0b_00001_1
+  ASSET_MULTI_FUNC      uint64 = 0b_00010_1
+  ASSET_MULTI_GENERATOR uint64 = 0b_00100_1
 )
 
 
-var ASSET_MULTI_TYPES = []int {
+var ASSET_MULTI_TYPES = [] uint64 {
   ASSET_MULTI_ARRAY,
   ASSET_MULTI_FUNC,
   ASSET_MULTI_GENERATOR,
@@ -61,17 +55,16 @@ type Asset struct {
 
   Mimetype  string
   Data      any
+  Modified  bool
 
   // IO handling
   //
-  FilePath        string
-  ReadFilePath    string
-  WriteFilePath   string
+  FileReadPath    string
+  FileWritePath   string
   Size            int
   was_read        bool
   is_directory    bool
 
-  content         any
   content_bytes   *[]byte
   content_string  string
   reader          io.Reader
@@ -79,7 +72,7 @@ type Asset struct {
   // Asset types: An asset struct can represent a singular asset, an array of
   // assets, or a lazy asset generator.
   //
-  TypeMask         int
+  TypeMask         uint64
   asset_array      []*Asset
   asset_array_func func (*Asset) ([]*Asset, error)
 
@@ -87,8 +80,8 @@ type Asset struct {
   // other assets. In order to act like a generator, an Asset can
   // store pointers to generator functions which
   //
-  generator_start   func (a *Asset) (next func () (*Asset, error), err error)
-  generator_next    func () (*Asset, error)
+  generator_start func (a *Asset) (next func () (*Asset, error), err error)
+  generator_next  func () (*Asset, error)
 }
 
 
@@ -137,13 +130,6 @@ func (a *Asset) GenerateAssetsArray () ([]*Asset, error) {
 
     assets = append(assets, asset)
   }
-}
-
-
-type HistoryEntry struct {
-  Url     *url.URL
-  Parents []*HistoryEntry
-  Time    time.Time
 }
 
 
@@ -207,12 +193,18 @@ func (s *Spec) EmitAsset (a *Asset) error {
 
 
 func (s *Spec) EmitFileKey (file_path string, key_parts ...string) error {
-  asset, err := s.MakeFileKeyAsset(file_path, key_parts...)
+  var key = append([]string {"@emit"}, key_parts...)
+  asset, err := s.MakeFileKeyAsset(file_path, key...)
   if err != nil { return err }
   return s.EmitAsset(asset)
 }
 
 
+/*
+  Relative to this Spec's `source_dir` path, look for a file at
+  `source_path`, and create a filesystem asset with a URL key at
+  `key_parts`.
+*/
 func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asset, error) {
   source_dir, err := s.RequirePropString("source_dir")
   if err != nil { return nil, err }
@@ -240,7 +232,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
   // TODO: check for symbolic links
   var is_dir bool = file_info.IsDir() 
 
-  var asset_url *url.URL = s.MakeUrl("@emit", key)
+  var asset_url *url.URL = s.MakeUrl(key)
 
   var history = HistoryEntry {
     Url:     asset_url,
@@ -248,22 +240,28 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     Time:    time.Now(),
   }
 
+
+  // TODO: specify means of singular access
+  var type_mask uint64 = ASSET_TYPE_UNDEFINED
+
   var asset = Asset {
-    Url:        asset_url,
-    History:    & history,
-    Spec:       s,
-    Mimetype:   mimetype,
-    Size:       -1,
-    TypeMask:   ASSET_TYPE_UNDEFINED, // TODO: specify means of singular access
+    Url:          asset_url,
+    History:      & history,
+    Spec:         s,
+    Mimetype:     mimetype,
+    Size:         -1,
+    TypeMask:     type_mask,
 
     is_directory: is_dir,
 
-    FilePath:   file_path,
+    FileReadPath: file_path,
   }
 
   if is_dir {
     asset.Mimetype = "inode/directory"
-    asset.TypeMask = ASSET_MULTI_FUNC | ASSET_MULTI_GENERATOR
+
+    type_mask = ASSET_MULTI_FUNC | ASSET_MULTI_GENERATOR
+    asset.TypeMask = type_mask
 
     var keys = make([]string, 0)
     var walk_err error = nil
@@ -287,7 +285,8 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
 
       for _, key := range keys {
         var file_path string = filepath.Join(file_path, key)
-        asset, err := s.MakeFileKeyAsset(file_path, key)
+        asset, err := s.MakeFileKeyAsset(file_path, asset.Url.Path, key)
+
         if err != nil { return nil, err }
         assets = append(assets, asset)
       }
@@ -306,7 +305,10 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
 
       var file_path string = filepath.Join(file_path, key)
 
-      return s.MakeFileKeyAsset(file_path, key)
+      asset, err :=  s.MakeFileKeyAsset(file_path, key)
+      if err != nil { return nil, err }
+
+      return asset, nil
     }
   }
 

@@ -3,6 +3,7 @@ package behaviors
 import (
   . "gilchrist.tech/interbuilder"
   "sync"
+  "path"
   "path/filepath"
   "os"
   "strings"
@@ -215,4 +216,49 @@ func TaskEmit (s *Spec, t *Task) error {
 
   return  nil
   */
+}
+
+
+func TaskConsumeCopyFiles (s *Spec, task *Task) error {
+  source_dir, err := s.RequirePropString("source_dir")
+  if err != nil { return err }
+
+  stat, err := os.Stat(source_dir) 
+  if stat != nil {
+    os.RemoveAll(source_dir)
+  }
+
+  for input := range s.Input {
+    assets, err := input.Expand()
+    if err != nil { return err }
+
+    for _, asset := range assets {
+      if asset.FileReadPath == "" {
+        s.EmitAsset(asset)
+        continue
+      }
+
+      var key string = asset.Url.Path
+      if strings.HasPrefix(key, "@emit") {
+        key = key[len("@emit"):]
+      }
+
+      if exists, _ := s.PathExists(key); exists {
+        continue
+      }
+
+      var dest string  = filepath.Join(source_dir, key)
+      var directory, _ = path.Split(dest)
+      if err != nil { return err }
+
+      err = os.MkdirAll(directory, os.ModePerm)
+      if err != nil { return err }
+
+      err = os.Link(asset.FileReadPath, dest)
+      if err != nil { return err }
+    }
+  }
+
+  s.EmitFileKey("/")
+  return nil
 }

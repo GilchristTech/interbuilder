@@ -27,9 +27,9 @@ func TestAssetExpandSingular (t *testing.T) {
 
 
 func TestAssetExpandArray (t *testing.T) {
-  var type_mask   = ASSET_MULTI_ARRAY
-  var base_url, _ = url.Parse("ib://testing/mask")
-  var test_url    = base_url.JoinPath(strconv.Itoa(type_mask))
+  var type_mask uint64 = ASSET_MULTI_ARRAY
+  var base_url, _      = url.Parse("ib://testing/mask")
+  var test_url         = base_url.JoinPath(strconv.FormatUint(type_mask, 2))
 
   var asset_array = make([]*Asset, 3)
 
@@ -59,7 +59,7 @@ func TestAssetExpandArray (t *testing.T) {
 func TestAssetExpandArrayFunc (t *testing.T) {
   var test_url, _ = url.Parse("ib://testing/mask")
   var type_mask   = ASSET_MULTI_FUNC
-  var base_url    = test_url.JoinPath(strconv.Itoa(type_mask))
+  var base_url    = test_url.JoinPath(strconv.FormatUint(type_mask, 2))
 
   var test_asset = & Asset {
     Url:      base_url,
@@ -94,9 +94,9 @@ func TestAssetExpandGenerator (t *testing.T) {
   // doesn't terminate.
   //
   wrapTimeout(t, func () {
-    var test_url, _   = url.Parse("ib://testing/mask")
-    var type_mask int = ASSET_MULTI_GENERATOR
-    var base_url      = test_url.JoinPath(strconv.Itoa(type_mask))
+    var test_url, _      = url.Parse("ib://testing/mask")
+    var type_mask uint64 = ASSET_MULTI_GENERATOR
+    var base_url         = test_url.JoinPath(strconv.FormatUint(type_mask, 2))
 
     var generator_start = func (a *Asset) (func()(*Asset, error), error) {
       var asset_array = make([]*Asset, 3)

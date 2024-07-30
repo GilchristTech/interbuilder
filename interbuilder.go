@@ -6,6 +6,7 @@ import (
   "sync"
   "net/url"
   "strings"
+  "time"
 )
 
 
@@ -48,6 +49,13 @@ type Spec struct {
   tasks_push_queue   *Task
   tasks_push_end     *Task
   task_queue_lock    sync.Mutex
+}
+
+
+type HistoryEntry struct {
+  Url     *url.URL
+  Parents []*HistoryEntry
+  Time    time.Time
 }
 
 
