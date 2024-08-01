@@ -1,6 +1,7 @@
 package behaviors
 
 import (
+  "fmt"
   . "gilchrist.tech/interbuilder"
   "sync"
   "path"
@@ -16,7 +17,7 @@ var DownloaderMutex sync.Mutex
 
 var TaskResolverSourceGitClone = TaskResolver {
   Id: "source-git-clone",
-  Name: "git-clone", // TODO: consider renaming to get-source
+  Name: "git-clone", // TODO: consider renaming to source-get-git
   TaskPrototype: Task {
     Func: TaskSourceGitClone,
   },
@@ -63,6 +64,24 @@ var TaskResolverInferSource = TaskResolver {
   Name:      "source-infer",
   MatchFunc: nil,
   Children:  &TaskResolverInferSourceNodeJS,
+
+  TaskPrototype: Task {
+    Func: func (spec *Spec, task *Task) error {
+      tr, err := task.Resolver.MatchChildren(task.Name, spec)
+      if err != nil {
+        task.Println("Error when inferring source")
+        return fmt.Errorf("Error inferring while inferring source: %w", err)
+      }
+
+      if tr == nil {
+        task.Println("Could not infer source")
+        return nil
+      }
+
+      spec.EnqueueTask(tr.NewTask())
+      return nil
+    },
+  },
 }
 
 
@@ -76,7 +95,7 @@ var TaskResolverInferSourceNodeJS = TaskResolver {
     Func: func (spec *Spec, task *Task) error {
       if _, e := spec.EnqueueTaskName("source-install-nodejs"); e != nil { return e }
       if _, e := spec.EnqueueTaskName("source-build-nodejs");   e != nil { return e }
-      if _, e := spec.EnqueueTaskName("source-emit");           e != nil { return e }
+      // if _, e := spec.EnqueueTaskName("source-emit");           e != nil { return e }
       return nil
     },
   },
@@ -84,7 +103,7 @@ var TaskResolverInferSourceNodeJS = TaskResolver {
 
 
 var TaskResolverSourceInstallNodeJS = TaskResolver {
-  Id: "source-install-nodejs",
+  Id:   "source-install-nodejs",
   Name: "source-install-nodejs",
   TaskPrototype: Task { Func: TaskSourceInstallNodeJS },
 }
@@ -116,7 +135,7 @@ func TaskSourceInstallNodeJS (s *Spec, t *Task) error {
 
 
 var TaskResolverSourceBuildNodeJS = TaskResolver {
-  Id: "source-build-nodejs",
+  Id:   "source-build-nodejs",
   Name: "source-build-nodejs",
   TaskPrototype: Task { Func: TaskSourceBuildNodeJS },
 }
@@ -229,7 +248,7 @@ func TaskConsumeCopyFiles (s *Spec, task *Task) error {
   }
 
   for input := range s.Input {
-    assets, err := input.Expand()
+    assets, err := input.Expand() // TODO: flatten, not expand
     if err != nil { return err }
 
     for _, asset := range assets {

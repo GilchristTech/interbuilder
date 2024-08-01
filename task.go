@@ -30,11 +30,25 @@ type TaskResolver struct {
 type Task struct {
   Spec       *Spec
   ResolverId string
+  Resolver   *TaskResolver
   Name       string
   Started    bool
   Func       TaskFunc
   Next       *Task
   History    HistoryEntry;
+}
+
+
+func (t *Task) Println (a ...any) (n int, err error) {
+  var spec_name = "<nil>"
+  if t.Spec != nil {
+    spec_name = t.Spec.Name
+  }
+  var stdout_prefix = "[" + spec_name + "/" + t.Name + "] "
+  var content string = fmt.Sprintln(a...)
+  content = content[:len(content)-1]  // Trip newline
+  content = stdout_prefix + strings.ReplaceAll(content, "\n", "\n"+stdout_prefix)
+  return fmt.Println(content)
 }
 
 
@@ -64,14 +78,10 @@ func (tr *TaskResolver) Match (name string, s *Spec) (*TaskResolver, error) {
       return nil, nil
     }
 
-    for child := tr.Children ; child != nil ; child = child.Next {
-      child_match, err := child.Match(name, s)
-      if err != nil {
-        return nil, err
-      }
-      if child_match != nil {
-        return child_match, nil
-      }
+    child_match, err := tr.MatchChildren(name, s)
+    if err != nil { return nil, err }
+    if child_match != nil {
+      return child_match, nil
     }
 
     return tr, nil
@@ -82,24 +92,38 @@ func (tr *TaskResolver) Match (name string, s *Spec) (*TaskResolver, error) {
     return nil, err
   }
 
-  for child := tr.Children ; child != nil ; child = child.Next {
-    matched_resolver, err := child.Match(name, s)
-    if err != nil {
-      return nil, err
-    }
-    if matched_resolver != nil {
-      return matched_resolver, nil
-    }
+  child_match, err := tr.MatchChildren(name, s)
+  if err != nil { return nil, err }
+  if child_match != nil {
+    return child_match, nil
   }
 
   return tr, nil
 }
 
 
+func (tr *TaskResolver) MatchChildren (name string, spec *Spec) (*TaskResolver, error) {
+  for child := tr.Children ; child != nil ; child = child.Next {
+    child_match, err := child.Match(name, spec)
+    if err != nil {
+      return nil, err
+    }
+    if child_match != nil {
+      return child_match, nil
+    }
+  }
+
+  return nil, nil
+}
+
+
 func (tr *TaskResolver) NewTask() *Task {
-  task           := tr.TaskPrototype  // shallow copy
+  var task Task = tr.TaskPrototype  // shallow copy
+
   task.Name       = tr.Name
   task.ResolverId = tr.Id
+  task.Resolver   = tr
+
   return &task
 }
 
@@ -108,6 +132,9 @@ func (tr *TaskResolver) GetTask (name string, s *Spec) (*Task, error) {
   resolver, err := tr.Match(name, s)
   if resolver == nil || err != nil {
     return nil, err
+  }
+  if resolver.TaskPrototype.Func == nil {
+    return nil, fmt.Errorf("Task resolver has a null task function")
   }
   return resolver.NewTask(), nil
 }
@@ -218,6 +245,17 @@ func (t *Task) GetPropString (key string) (value string, ok, found bool) {
 
   value_any, found := t.Spec.Props[key]
   value,     ok     = value_any.(string)
+  return value, ok, found
+}
+
+
+func (t *Task) GetPropUrl (key string) (value *url.URL, ok, found bool) {
+  if t.Spec == nil {
+    return nil, false, false
+  }
+
+  value_any, found := t.Spec.Props[key]
+  value,     ok     = value_any.(*url.URL)
   return value, ok, found
 }
 

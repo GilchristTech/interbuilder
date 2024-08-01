@@ -5,6 +5,7 @@ import (
   "fmt"
   "net/url"
   "path"
+  "strings"
 )
 
 
@@ -109,11 +110,20 @@ func ResolveTaskSourceGitClone (s *Spec) error {
     s.AddTaskResolver(&TaskResolverSourceGitClone)
   }
 
-  // TODO: check whether the source is a git:// URL
+  source, ok, _ := s.GetPropUrl("source")
+  if ok == false {
+    return nil
+  }
 
-  if _, has_source := s.Props["source"] ; has_source {
-    s.EnqueueUniqueTaskName("git-clone")
-    s.EnqueueUniqueTaskName("source-infer")
+  var is_git_scheme bool = source.Scheme == "git"
+  var is_github     bool = source.Host == "github.com"
+  var is_git_file   bool = strings.HasSuffix(source.Path, ".git")
+
+  if ( is_git_scheme || is_github || is_git_file ){
+    _, err := s.EnqueueUniqueTaskName("git-clone")
+    if err != nil { return err }
+    _, err  = s.EnqueueUniqueTaskName("source-infer")
+    if err != nil { return err }
   }
 
   return nil
@@ -121,7 +131,7 @@ func ResolveTaskSourceGitClone (s *Spec) error {
 
 
 func ResolveTaskInferSource(s *Spec) error {
-  if s.GetTaskResolverById("infer-source-root") == nil {
+  if s.GetTaskResolverById("source-infer-root") == nil {
     s.AddTaskResolver(&TaskResolverInferSource)
   }
   return nil

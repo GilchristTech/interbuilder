@@ -2,7 +2,7 @@ MODULE_SRC := $(wildcard *.go behaviors/*.go)
 CMD_SRC    := $(wildcard cmd/*.go)
 CMD        := interbuilder
 
-WATCHER := npx nodemon -w . -w Makefile -e go,mod,json -i build -x
+WATCHER := npx nodemon -w . -w Makefile -e go,mod,json -i build/ -x
 
 $(CMD): $(CMD_SRC) $(MODULE_SRC)
 	go build -o $(CMD) $(CMD_SRC)
@@ -15,6 +15,7 @@ cli:   $(CMD)
 
 clean:
 	rm $(CMD)
+	rm -rf build/
 
 test: $(MODULE_SRC)
 	go test $(TEST_ARGS)

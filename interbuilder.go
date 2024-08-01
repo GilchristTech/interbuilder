@@ -7,6 +7,8 @@ import (
   "net/url"
   "strings"
   "time"
+  "reflect"
+  "runtime"
 )
 
 
@@ -102,8 +104,21 @@ func (s *Spec) ResolveOther (o *Spec) error {
   }
 
   for _, resolver := range s.SpecResolvers {
+    // Resolve this spec's 
     if err := resolver(o); err != nil {
-      return err
+      resolver_name := runtime.FuncForPC(reflect.ValueOf(resolver).Pointer()).Name()
+
+      if o == s {
+        return fmt.Errorf(
+          "Resolver error in Spec %s in resolver %s: %w",
+          s.Name, resolver_name, err,
+        )
+      }
+
+      return fmt.Errorf(
+        "Resolver error in Spec %s (resolving via Spec %s) in resolver %s: %w",
+        o.Name, s.Name, resolver_name, err,
+      )
     }
   }
 
@@ -156,6 +171,13 @@ func (s *Spec) InheritPropBool (key string) (value bool, ok, found bool) {
 func (s *Spec) GetPropString (key string) (value string, ok, found bool) {
   value_any, found := s.Props[key]
   value,     ok     = value_any.(string)
+  return value, ok, found
+}
+
+
+func (s *Spec) GetPropUrl (key string) (value *url.URL, ok, found bool) {
+  value_any, found := s.Props[key]
+  value,     ok     = value_any.(*url.URL)
   return value, ok, found
 }
 
@@ -258,7 +280,7 @@ func (s *Spec) GetTask (name string, spec *Spec) (*Task, error) {
   for resolver := s.TaskResolvers ; resolver != nil ; resolver = resolver.Next {
     task, err := resolver.GetTask(name, spec)
     if err != nil {
-      return nil, err
+      return nil, fmt.Errorf("Error getting task in TaskResolver %s: %w", resolver.Id, err)
     }
     if task != nil {
       task.Spec = s
@@ -376,6 +398,20 @@ func (s *Spec) EnqueueTaskName (name string) (*Task, error) {
     return nil, err
   }
   return s.EnqueueTask(task), nil
+}
+
+
+func (s *Spec) EnqueueUniqueTask (t *Task) (*Task, error) {
+  if t.Name == "" {
+    return nil, fmt.Errorf("EnqueueUniqueTask error: task's name is empty")
+  }
+
+  existing_task := s.GetTaskFromQueue(t.Name)
+  if existing_task != nil {
+    return existing_task, nil
+  }
+
+  return s.EnqueueTask(t), nil
 }
 
 

@@ -52,4 +52,6 @@ func main () {
   if err = root.Run() ; err != nil {
     log.Panic(err)
   }
+
+  PrintSpec(root, 0)
 }
