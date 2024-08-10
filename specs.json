@@ -6,11 +6,15 @@
     "imposition": {
       "source": "git://github.com/GilchristTech/web-imposition",
       "install_cmd": "npm i",
-      "href_prefix": "imposition/"
+      "transform": {
+        "prefix": "imposition"
+      }
     },
     "comic": {
       "source": "git://github.com/GilchristTech/spacehouse-website",
-      "href_prefix": "comic/"
+      "transform": {
+        "prefix": "comic"
+      }
     }
   }
 }
