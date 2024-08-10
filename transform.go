@@ -393,6 +393,36 @@ func PathTransformationFromProp (prop map[string]any) (*PathTransformation, erro
   return &transformation, nil
 }
 
+func PathTransformationsFromAny (src any) ([]*PathTransformation, error) {
+  if src == nil {
+    return nil, nil
+  }
+
+  switch src := src.(type) {
+    case string:
+      transformation, err := PathTransformationFromString(src)
+      if err != nil { return nil, err }
+      return []*PathTransformation { transformation }, nil
+
+    case map[string]any:
+      transformation, err := PathTransformationFromProp(src)
+      if err != nil { return nil, err }
+      return []*PathTransformation { transformation }, nil
+
+    case []any:
+      transformations := make([]*PathTransformation, 0, len(src))
+      for _, item_src := range src {
+        transformations_append, err := PathTransformationsFromAny(item_src)
+        if err != nil { return nil, err }
+        transformations = append(transformations, transformations_append...)
+      }
+      return transformations, nil
+
+    default:
+      return nil, fmt.Errorf("Error parsing path transformation, expected string, object, or array, got %T", src)
+  }
+}
+
 
 func RegexpReplaceOneStringFunc (rgx *regexp.Regexp, find string, replace func (string) string) string {
   var break_replace bool

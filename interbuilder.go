@@ -40,6 +40,8 @@ type Spec struct {
   Input           chan *Asset
   InputGroup      sync.WaitGroup
 
+  PathTransformations []*PathTransformation
+
   SpecResolvers   []SpecResolver
   Props           SpecProps
 
@@ -69,15 +71,16 @@ func NewSpec (name string, spec_url *url.URL) *Spec {
   }
 
   spec := Spec {
-    Name:            name,
-    Url:             spec_url,
-    History:         HistoryEntry { Url: spec_url  },
-    Subspecs:        make( map[string]*Spec        ),
-    OutputChannels:  make( [] *chan *Asset,       0),
-    OutputGroups:    make( [] *sync.WaitGroup,    0),
-    Input:           make( chan *Asset             ),
-    SpecResolvers:   make( [] SpecResolver,       0),
-    Props:           make( SpecProps               ),
+    Name:                name,
+    Url:                 spec_url,
+    History:             HistoryEntry { Url: spec_url  },
+    Subspecs:            make( map[string]*Spec        ),
+    OutputChannels:      make( [] *chan *Asset,       0),
+    OutputGroups:        make( [] *sync.WaitGroup,    0),
+    Input:               make( chan *Asset             ),
+    PathTransformations: make( []*PathTransformation, 0),
+    SpecResolvers:       make( [] SpecResolver,       0),
+    Props:               make( SpecProps               ),
   }
 
   spec.Root = &spec

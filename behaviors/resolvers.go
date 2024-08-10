@@ -130,7 +130,7 @@ func ResolveTaskSourceGitClone (s *Spec) error {
 }
 
 
-func ResolveTaskInferSource(s *Spec) error {
+func ResolveTaskInferSource (s *Spec) error {
   if s.GetTaskResolverById("source-infer-root") == nil {
     s.AddTaskResolver(&TaskResolverInferSource)
   }
@@ -145,6 +145,25 @@ func ResolveTasksNodeJS (s *Spec) error {
 
   if s.GetTaskResolverById("source-build-nodejs") == nil {
     s.AddTaskResolver(&TaskResolverSourceBuildNodeJS)
+  }
+
+  return nil
+}
+
+
+func ResolveTransform (s *Spec) error {
+  transform_any, transform_found := s.GetProp("transform")
+  if ! transform_found {
+    return nil
+  }
+
+  transformations, err := PathTransformationsFromAny(transform_any)
+  if err != nil { return err }
+
+  if len(s.PathTransformations) == 0 {
+    s.PathTransformations = transformations
+  } else {
+    s.PathTransformations = append(s.PathTransformations, transformations...)
   }
 
   return nil

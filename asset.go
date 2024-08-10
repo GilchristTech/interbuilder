@@ -185,9 +185,25 @@ func (s *Spec) GetKeyPath (k string) (string, error) {
 
 
 func (s *Spec) EmitAsset (a *Asset) error {
+  for _, transformation := range s.PathTransformations {
+    var url_path    string = a.Url.Path
+    var emit_prefix string = ""
+
+    if strings.HasPrefix(url_path, "/@emit") {
+      emit_prefix = url_path[:len("/@emit")]
+      url_path    = url_path[len("/@emit"):]
+    } else if strings.HasPrefix(url_path, "@emit") {
+      emit_prefix = url_path[:len("@emit")]
+      url_path    = url_path[len("@emit"):]
+    }
+
+    a.Url.Path = emit_prefix + transformation.TransformPath(url_path)
+  }
+
   for _, output := range s.OutputChannels {
     (*output) <- a
   }
+
   return nil
 }
 

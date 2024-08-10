@@ -20,6 +20,7 @@ func MakeDefaultRootSpec () *Spec {
   root.AddSpecResolver(behaviors.ResolveTaskSourceGitClone)
   root.AddSpecResolver(behaviors.ResolveTasksNodeJS)
 
+  root.AddSpecResolver(behaviors.ResolveTransform)
   root.AddSpecResolver(behaviors.ResolveSubspecs)
 
   root.EnqueueTaskFunc("root-consume", behaviors.TaskConsumeCopyFiles)
