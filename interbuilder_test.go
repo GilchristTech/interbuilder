@@ -2,6 +2,7 @@ package interbuilder
 
 import (
   "testing"
+  "fmt"
 )
 
 
@@ -110,9 +111,9 @@ func TestSpecChildRunEmitConsumesAssetFinishes (t *testing.T) {
   root.Props["quiet"] = true
 
   subspec.EnqueueTaskFunc("test-emit", func (s *Spec, t *Task) error {
-    s.EmitAsset( & Asset {} )
-    s.EmitAsset( & Asset {} )
-    s.EmitAsset( & Asset {} )
+    if e := s.EmitAsset( & Asset { Url: s.MakeUrl("a") } ); e != nil { return e }
+    if e := s.EmitAsset( & Asset { Url: s.MakeUrl("b") } ); e != nil { return e }
+    if e := s.EmitAsset( & Asset { Url: s.MakeUrl("c") } ); e != nil { return e }
     return nil
   })
 
@@ -132,4 +133,113 @@ func TestSpecChildRunEmitConsumesAssetFinishes (t *testing.T) {
   })
 
   wrapTimeoutError(t, root.Run)
+}
+
+
+func TestSpecChainTransformAssetPaths (t *testing.T) {
+  root    := NewSpec("root", nil)
+  level_3 :=    root.AddSubspec( NewSpec("level_3", nil ) )
+  level_2 := level_3.AddSubspec( NewSpec("level_2", nil ) )
+  level_1 := level_2.AddSubspec( NewSpec("level_1", nil ) )
+
+  root.Props["quiet"] = true
+
+  var produce_assets_started  bool
+  var produce_assets_finished bool
+
+  for spec_i, s := range []*Spec { level_1, level_2, level_3 } {
+    // Define path transformations
+    //
+    var path_transformation_prop = make(map[string]any)
+    path_transformation_prop["prefix"] = s.Name
+    path_transformation, err := PathTransformationsFromAny(path_transformation_prop)
+    if err != nil { t.Fatal(err) }
+    s.PathTransformations = path_transformation
+
+    s.EnqueueTaskFunc("chain-assets", func (s *Spec, task *Task) error {
+      var num_assets = 0
+
+      // The lowest-level spec in the chain should
+      // produce assets instead of consuming them.
+      //
+      if spec_i == 0 {
+        produce_assets_started = true
+        for x := range 3 {
+          asset_url := s.MakeUrl(fmt.Sprintf("a%d", x))
+          task.Println(asset_url)
+          if err := s.EmitAsset( & Asset { Url: asset_url }); err != nil {
+            t.Fatal(err)
+          }
+          num_assets++
+        }
+        produce_assets_finished = true
+      } else {
+        // Consume assets if this is not the
+        // lowest-level spec in the chain
+        //
+        for a := range s.Input {
+          task.Println(a.Url)
+          s.EmitAsset(a)
+          num_assets++
+        }
+      }
+
+      if num_assets != 3 {
+        t.Fatal(fmt.Sprintf("Task %s in spec %s emitted %d assets, but expected 3", task.Name, s.Name, num_assets))
+      }
+
+      return nil
+    })
+  }
+
+  root.EnqueueTaskFunc("pool-test-assets", func (s *Spec, task *Task) error {
+    var expected_urls = []string {
+      "ib://level_3/@emit/level_3/level_2/level_1/a0",
+      "ib://level_3/@emit/level_3/level_2/level_1/a1",
+      "ib://level_3/@emit/level_3/level_2/level_1/a2",
+    }
+
+    var expected_urls_found [3]bool
+
+    for asset := range s.Input {
+      task.Println(asset.Url)
+      
+      var url_matches bool
+
+      for i, expected_url := range expected_urls {
+        if asset.Url.String() == expected_url {
+          if expected_urls_found[i] == true {
+            t.Fatal("Root spec encountered an expected URL twice", asset.Url)
+          }
+          expected_urls_found[i] = true
+          url_matches = true
+          break
+        }
+      }
+
+      if url_matches == false {
+        t.Fatal("Root spec encountered unexpected URL:", asset.Url)
+      }
+    }
+
+    // Check that each URL has been found
+    //
+    for i, expected_url := range expected_urls {
+      if ! expected_urls_found[i] {
+        t.Fatal("Root spec did not encounter all expected URLs, missing", expected_url)
+      }
+    }
+
+    return nil
+  })
+
+  wrapTimeoutError(t, root.Run)
+
+  if produce_assets_started == false {
+    t.Fatal("Task produce-assets not started")
+  }
+
+  if produce_assets_finished == false {
+    t.Fatal("Task produce-assets not finished")
+  }
 }

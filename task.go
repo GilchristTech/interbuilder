@@ -41,9 +41,14 @@ type Task struct {
 
 func (t *Task) Println (a ...any) (n int, err error) {
   var spec_name = "<nil>"
+
   if t.Spec != nil {
+    if quiet, _, _ := t.Spec.InheritPropBool("quiet"); quiet {
+      return 0, nil
+    }
     spec_name = t.Spec.Name
   }
+
   var stdout_prefix = "[" + spec_name + "/" + t.Name + "] "
   var content string = fmt.Sprintln(a...)
   content = content[:len(content)-1]  // Trip newline

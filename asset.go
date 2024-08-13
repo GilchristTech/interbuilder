@@ -185,19 +185,46 @@ func (s *Spec) GetKeyPath (k string) (string, error) {
 
 
 func (s *Spec) EmitAsset (a *Asset) error {
+  if a.Url == nil {
+    return fmt.Errorf("Cannot emit asset with a nil URL")
+  }
+
+  var modified       bool = false
+  var url_path     string = a.Url.Path
+  var url_prefix   string = ""
+  var suffix_path  string = ""
+
+  if strings.HasPrefix(url_path, "/@emit") {
+    url_prefix  = url_path[:len("/@emit")]
+    suffix_path = url_path[len("/@emit"):]
+  } else if strings.HasPrefix(url_path, "@emit") {
+    url_prefix  = url_path[:len("@emit")]
+    suffix_path = url_path[len("@emit"):]
+  } else {
+    // TODO: detect leading and trailing slashes
+    url_prefix = "@emit/"
+    suffix_path = url_path
+    modified = true
+  }
+
+  var suffix_path_original = suffix_path
+
+  // Apply path transformations
+  //
   for _, transformation := range s.PathTransformations {
-    var url_path    string = a.Url.Path
-    var emit_prefix string = ""
+    suffix_path = transformation.TransformPath(suffix_path)
 
-    if strings.HasPrefix(url_path, "/@emit") {
-      emit_prefix = url_path[:len("/@emit")]
-      url_path    = url_path[len("/@emit"):]
-    } else if strings.HasPrefix(url_path, "@emit") {
-      emit_prefix = url_path[:len("@emit")]
-      url_path    = url_path[len("@emit"):]
+    if !modified && (suffix_path != suffix_path_original) {
+      modified = true
     }
+  }
 
-    a.Url.Path = emit_prefix + transformation.TransformPath(url_path)
+  // If the asset was modified, make a shallow copy
+  //
+  if modified {
+    copied     := *a
+    copied.Url  = s.MakeUrl(url_prefix + suffix_path)
+    a           = & copied
   }
 
   for _, output := range s.OutputChannels {

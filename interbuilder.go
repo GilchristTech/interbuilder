@@ -483,6 +483,15 @@ func (s *Spec) Printf (format string, a ...any) (n int, err error) {
 }
 
 
+func (s *Spec) Println (a ...any) (n int, err error) {
+  if quiet, _, _ := s.InheritPropBool("quiet"); quiet {
+    return 0, nil
+  }
+
+  return fmt.Println(a...)
+}
+
+
 func (s *Spec) Run () error {
   // TODO: print message verbosity settings; these should not print during tests
   s.Printf("[%s] Running\n", s.Name)
@@ -558,7 +567,7 @@ func (s *Spec) Run () error {
     err := s.EmitAsset(asset)
     if err != nil { return err }
   }
-  
+
   // For the above range to finish, s.Input must be closed. This
   // function runs a goroutine which waits for the subspecs to
   // finish executing before closing the input channel, which
