@@ -17,35 +17,28 @@ import (
 //
 const (
   /* Asset type mask bit ranges */
-  ASSET_FIELDS          uint64 = 0b_11111_1
-  ASSET_FIELDS_QUANTITY uint64 = 0b_00000_1
-  ASSET_FIELDS_ACCESS   uint64 = 0b_11111_0
+  ASSET_FIELDS          uint64 = 0b_1_11111
+  ASSET_FIELDS_QUANTITY uint64 = 0b_1_00000
+  ASSET_FIELDS_ACCESS   uint64 = 0b_0_11111
 
-  ASSET_TYPE_UNDEFINED  uint64 = 0b_00000_0
+  ASSET_TYPE_UNDEFINED  uint64 = 0b_0_00000
 
   /* Asset quantity bit: (whether asset is singular or pluralistic) */
-  ASSET_QUANTITY_SINGLE uint64 = 0b_00000_0
-  ASSET_QUANTITY_MULTI  uint64 = 0b_00000_1
+  ASSET_QUANTITY_SINGLE uint64 = 0b_0_00000
+  ASSET_QUANTITY_MULTI  uint64 = 0b_1_00000
 
   /* Singular asset types */
-  ASSET_SINGLE_READER   uint64 = 0b_00001_0
-  ASSET_SINGLE_WRITER   uint64 = 0b_00010_0
-  ASSET_SINGLE_BYTES    uint64 = 0b_00100_0
-  ASSET_SINGLE_STRING   uint64 = 0b_01000_0
-  ASSET_SINGLE_DATA     uint64 = 0b_10000_0
+  ASSET_SINGLE_READER   uint64 = 0b_0_00001
+  ASSET_SINGLE_WRITER   uint64 = 0b_0_00010
+  ASSET_SINGLE_BYTES    uint64 = 0b_0_00100
+  ASSET_SINGLE_STRING   uint64 = 0b_0_01000
+  ASSET_SINGLE_DATA     uint64 = 0b_0_10000
 
   /* Mult-asset types */
-  ASSET_MULTI_ARRAY     uint64 = 0b_00001_1
-  ASSET_MULTI_FUNC      uint64 = 0b_00010_1
-  ASSET_MULTI_GENERATOR uint64 = 0b_00100_1
+  ASSET_MULTI_ARRAY     uint64 = 0b_1_00001
+  ASSET_MULTI_FUNC      uint64 = 0b_1_00010
+  ASSET_MULTI_GENERATOR uint64 = 0b_1_00100
 )
-
-
-var ASSET_MULTI_TYPES = [] uint64 {
-  ASSET_MULTI_ARRAY,
-  ASSET_MULTI_FUNC,
-  ASSET_MULTI_GENERATOR,
-}
 
 
 type Asset struct {
@@ -238,7 +231,7 @@ func (s *Spec) EmitAsset (a *Asset) error {
 func (s *Spec) EmitFileKey (file_path string, key_parts ...string) error {
   var key = append([]string {"@emit"}, key_parts...)
   asset, err := s.MakeFileKeyAsset(file_path, key...)
-  if err != nil { return err }
+  if err != nil { return fmt.Errorf("Error emitting file file with key %s: %w", key, err) }
   return s.EmitAsset(asset)
 }
 

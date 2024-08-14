@@ -18,7 +18,7 @@ clean:
 	rm -rf build/
 
 test: $(MODULE_SRC)
-	go test $(TEST_ARGS)
+	go test ./ ./behaviors/ $(TEST_ARGS)
 test-watch:
 	$(WATCHER) 'make && make test || exit 1'
 

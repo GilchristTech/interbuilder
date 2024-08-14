@@ -267,18 +267,28 @@ func (t *Task) GetPropUrl (key string) (value *url.URL, ok, found bool) {
 
 func (t *Task) RequireProp (name string) (value any, err error) {
   if t.Spec == nil {
+    var resolver_id = t.ResolverId
+    if resolver_id == "" {
+      resolver_id = "<no resolver>"
+    }
+
     return nil, fmt.Errorf(
       "Task %s (%s) does not have Spec defined",
-      t.Name, t.ResolverId,
+      t.Name, resolver_id,
     )
   }
 
   value, found := t.Spec.Props[name]
 
   if !found {
+    var resolver_id = t.ResolverId
+    if resolver_id == "" {
+      resolver_id = "<no resolver>"
+    }
+
     return nil, fmt.Errorf(
       "Task %s/%s (%s) requires spec prop %s to exist",
-      t.Spec.Name, t.Name, t.ResolverId, name,
+      t.Spec.Name, t.Name, resolver_id, name,
     )
   }
 
@@ -297,9 +307,14 @@ func (t *Task) RequireInheritProp (name string) (value any, err error) {
   value, found := t.Spec.InheritProp(name)
 
   if found == false {
+    var resolver_id = t.ResolverId
+    if resolver_id == "" {
+      resolver_id = "<no resolver>"
+    }
+
     return nil, fmt.Errorf(
       "Task %s/%s (%s) requires inherited spec prop %s to exist",
-      t.Spec.Name, t.Name, t.ResolverId, name,
+      t.Spec.Name, t.Name, resolver_id, name,
     )
   }
 
@@ -316,9 +331,14 @@ func (t *Task) RequireInheritPropString (key string) (string, error) {
 
   value, ok := value_any.(string)
   if ok == false {
+    var resolver_id = t.ResolverId
+    if resolver_id == "" {
+      resolver_id = "<no resolver>"
+    }
+
     return "", fmt.Errorf(
       "Task %s/%s (%s) requires inherited spec prop %s to be a string, got %T",
-      t.Spec.Name, t.Name, t.ResolverId, key, t.Spec.Props[key],
+      t.Spec.Name, t.Name, resolver_id, key, t.Spec.Props[key],
     )
   }
 
@@ -334,9 +354,14 @@ func (t *Task) RequirePropString (name string) (value string, err error) {
 
   value, ok := value_any.(string)
   if !ok {
+    var resolver_id = t.ResolverId
+    if resolver_id == "" {
+      resolver_id = "<no resolver>"
+    }
+
     return "", fmt.Errorf(
       "Task %s/%s (%s) requires spec prop %s to be a string, got %T",
-      t.Spec.Name, t.Name, t.ResolverId, name, t.Spec.Props[name],
+      t.Spec.Name, t.Name, resolver_id, name, t.Spec.Props[name],
     )
   }
 
@@ -359,8 +384,14 @@ func (t *Task) RequirePropURL (name string) (value *url.URL, err error) {
     return &value, nil
   }
 
+  var resolver_id = t.ResolverId
+  if resolver_id == "" {
+    resolver_id = "<no resolver>"
+  }
+
+
   return nil, fmt.Errorf(
     "Task %s/%s (%s) requires spec prop %s to be a URL string, url.URL, or *url.URL, got %T",
-    t.Spec.Name, t.Name, t.ResolverId, name, t.Spec.Props[name],
+    t.Spec.Name, t.Name, resolver_id, name, t.Spec.Props[name],
   )
 }

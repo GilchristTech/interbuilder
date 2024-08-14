@@ -23,7 +23,7 @@ func MakeDefaultRootSpec () *Spec {
   root.AddSpecResolver(behaviors.ResolveTransform)
   root.AddSpecResolver(behaviors.ResolveSubspecs)
 
-  root.EnqueueTaskFunc("root-consume", behaviors.TaskConsumeCopyFiles)
+  root.EnqueueTaskFunc("root-consume", behaviors.TaskConsumeLinkFiles)
   return root
 }
 

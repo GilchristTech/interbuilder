@@ -25,7 +25,7 @@ func ResolveSubspecs (s *Spec) error {
 
   for name, subspec_any := range subspecs_json {
     subspec := NewSpec(name, nil)
-    subspec.Props = subspec_any.(map[string]any)  // can panic
+    subspec.Props = subspec_any.(map[string]any)  // TODO: can panic
     s.AddSubspec(subspec)
     subspecs[i] = subspec
     i++

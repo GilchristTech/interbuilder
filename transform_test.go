@@ -97,6 +97,11 @@ func TestPathTransformationsFromString (t *testing.T) {
       "path/replace/",
     },
     {
+      "s/^/prefix-/",
+      "string",
+      "prefix-string",
+    },
+    {
       "s`/path/`/path/changed/`",
       "root/path/unchanged",
       "root/path/changed/unchanged",

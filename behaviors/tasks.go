@@ -238,13 +238,23 @@ func TaskEmit (s *Spec, t *Task) error {
 }
 
 
-func TaskConsumeCopyFiles (s *Spec, task *Task) error {
-  source_dir, err := s.RequirePropString("source_dir")
+func TaskConsumeLinkFiles (s *Spec, task *Task) error {
+  source_dir, err := task.RequirePropString("source_dir")
   if err != nil { return err }
 
+  // Remove directory contents, if it exists
+  //
   stat, err := os.Stat(source_dir) 
   if stat != nil {
-    os.RemoveAll(source_dir)
+    dirents, err := os.ReadDir(source_dir)
+    if err != nil { return err }
+
+    for _, dirent := range dirents {
+      path := filepath.Join(source_dir, dirent.Name())
+      if err := os.RemoveAll(path); err != nil {
+        return err
+      }
+    }
   }
 
   for input := range s.Input {
