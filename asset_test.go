@@ -4,6 +4,9 @@ import (
   "testing"
   "net/url"
   "strconv"
+  "path/filepath"
+  "os"
+  "fmt"
 )
 
 
@@ -136,4 +139,114 @@ func TestAssetExpandGenerator (t *testing.T) {
       t.Fatalf("Expanded assets array in test asset expected to have a length of 3, got %d", len(assets))
     }
   })
+}
+
+
+func TestSpecPathExists (t *testing.T) {
+  var source_dir string = t.TempDir()
+
+  root := NewSpec("root", nil)
+  root.Props["source_dir"] = source_dir
+
+  // Make the file
+  //
+  var file_path = filepath.Join(source_dir, "exists.txt")
+  os.WriteFile(file_path, []byte("Test file!"), 0o660)
+
+  var exists bool
+  var err    error
+
+  // Test case where the path does exist
+  //
+  exists, err = root.PathExists("exists.txt")
+  if err != nil {
+    t.Fatal(err)
+  }
+  if exists == false {
+    t.Fatal("PathExists returns that the created file doesn't exist")
+  }
+
+  // Test case where the path does not exist
+  //
+  exists, err = root.PathExists("doesnt-exist.txt")
+  if err != nil {
+    t.Fatal(err)
+  }
+  if exists == true {
+    t.Fatal("PathExists returns that non-existing file doesn't exist")
+  }
+}
+
+
+func TestSpecMakeFileKeyAssetValidFile (t *testing.T) {
+  var source_dir string = t.TempDir()
+
+  root := NewSpec("root", nil)
+  root.Props["source_dir"] = source_dir
+
+  // Make the file and Asset
+  //
+  var file_path = filepath.Join(source_dir, "file.txt")
+  os.WriteFile(file_path, []byte("Test file!"), 0o660)
+  
+  asset, err := root.MakeFileKeyAsset("file.txt", "@emit", "file.txt")
+
+  // Basic Asset data assertions
+  //
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  if asset == nil {
+    t.Fatal("Asset is nil")
+  }
+  
+  if url := asset.Url.String(); url != "ib://root/@emit/file.txt" {
+    t.Fatalf("Asset Url is %s, expected ib://root/@emit/file.txt", url)
+  }
+
+  if !asset.IsSingle() || asset.IsMulti() {
+    t.Fatal("Asset is not singular, or is pluralistic")
+  }
+
+  // TODO: test reading the file and assert its content
+}
+
+
+func TestSpecMakeFileKeyAssetValidDirectory (t *testing.T) {
+  var source_dir string = t.TempDir()
+
+  root := NewSpec("root", nil)
+  root.Props["source_dir"] = source_dir
+
+  // Make files and the directory asset
+  //
+  for dir_i := range 3 {
+    for file_i := range 3 {
+      var file_path = filepath.Join(source_dir, fmt.Sprintf("%d", dir_i), fmt.Sprintf("%d.txt", file_i))
+      os.WriteFile(file_path, []byte("Test file!"), 0o660)
+    }
+  }
+  
+  asset, err := root.MakeFileKeyAsset("/", "@emit")
+
+  // Basic Asset data assertions
+  //
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  if asset == nil {
+    t.Fatal("Asset is nil")
+  }
+  
+  if url := asset.Url.String(); url != "ib://root/@emit" {
+    t.Fatalf("Asset Url is %s, expected ib://root/@emit", url)
+  }
+
+  if asset.IsSingle() || !asset.IsMulti() {
+    t.Fatal("Asset is not pluralistic, or is singular")
+  }
+
+  // TODO: test reading the file and assert its content
 }
