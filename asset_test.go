@@ -7,6 +7,7 @@ import (
   "path/filepath"
   "os"
   "fmt"
+  "io"
 )
 
 
@@ -209,7 +210,55 @@ func TestSpecMakeFileKeyAssetValidFile (t *testing.T) {
     t.Fatal("Asset is not singular, or is pluralistic")
   }
 
-  // TODO: test reading the file and assert its content
+  // Test reading the asset file and assert its content
+  //
+  reader, err := asset.GetReader()
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  if bytes, err := io.ReadAll(reader); err != nil {
+    t.Fatal(err)
+  } else {
+    if string(bytes) != "Test file!" {
+      t.Fatalf("Expected file contents: \"Test file!\", got \"%s\"", bytes)
+    }
+  }
+
+  if reader, ok := reader.(io.Closer); ok {
+    reader.Close()
+  } else {
+    t.Fatal("Reader is not a closer")
+  }
+
+  // Test writing the asset file
+  //
+  writer, err := asset.GetWriter() 
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  _, err = writer.Write([]byte("Test file updated"))
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  if writer, ok := writer.(io.Closer); ok {
+    writer.Close()
+  } else {
+    t.Fatal("Writer is not a closer")
+  }
+
+  // Assert the newly-updated asset file content
+  //
+  writen_bytes, err := os.ReadFile(file_path)
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  if writen := string(writen_bytes); writen != "Test file updated" {
+    t.Fatalf("File contents were \"%s\", expected \"Test file updated\"", writen)
+  }
 }
 
 

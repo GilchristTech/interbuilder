@@ -30,9 +30,6 @@ const (
   /* Singular asset types */
   ASSET_SINGLE_READER   uint64 = 0b_0_00001
   ASSET_SINGLE_WRITER   uint64 = 0b_0_00010
-  ASSET_SINGLE_BYTES    uint64 = 0b_0_00100
-  ASSET_SINGLE_STRING   uint64 = 0b_0_01000
-  ASSET_SINGLE_DATA     uint64 = 0b_0_10000
 
   /* Mult-asset types */
   ASSET_MULTI_ARRAY     uint64 = 0b_1_00001
@@ -47,25 +44,19 @@ type Asset struct {
   Spec      *Spec
 
   Mimetype  string
-  Data      any
-  Modified  bool
 
   // IO handling
   //
-  FileReadPath    string
-  FileWritePath   string
-  Size            int
-  was_read        bool
-  is_directory    bool
-
-  content_bytes   *[]byte
-  content_string  string
-  reader          io.Reader
+  FileSource string
 
   // Asset types: An asset struct can represent a singular asset, an array of
   // assets, or a lazy asset generator.
   //
   TypeMask         uint64
+
+  get_reader_func  func (*Asset) (io.Reader, error)
+  get_writer_func  func (*Asset) (io.Writer, error)
+
   asset_array      []*Asset
   asset_array_func func (*Asset) ([]*Asset, error)
 
@@ -285,15 +276,12 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     History:      & history,
     Spec:         s,
     Mimetype:     mimetype,
-    Size:         -1,
     TypeMask:     type_mask,
-
-    is_directory: is_dir,
-
-    FileReadPath: file_path,
+    FileSource:   file_path,
   }
 
   if is_dir {
+    // This asset is a directory. Populate it with pluralistic callback functions
     asset.Mimetype = "inode/directory"
 
     type_mask = ASSET_MULTI_FUNC | ASSET_MULTI_GENERATOR
@@ -346,6 +334,20 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
 
       return asset, nil
     }
+  } else {
+    // This asset is a file. Populate it with callbacks for IO handling
+
+    asset.TypeMask |= ASSET_SINGLE_READER | ASSET_SINGLE_WRITER
+
+    asset.get_reader_func = func (a *Asset) (io.Reader, error) {
+      return os.Open(a.FileSource)
+    }
+
+    asset.get_writer_func = func (a *Asset) (io.Writer, error) {
+      return os.Create(a.FileSource)
+    }
+
+    //asset.get_writer_func
   }
 
   return &asset, nil
@@ -382,4 +384,38 @@ func (a *Asset) Expand () ([]*Asset, error) {
   }
 
   return nil, fmt.Errorf("Unsupported asset type mask 0x%X", a.TypeMask)
+}
+
+
+func (a *Asset) GetReader () (io.Reader, error) {
+  if ! a.IsSingle() {
+    return nil, fmt.Errorf("Cannot get reader, asset is not singular")
+  }
+
+  if a.TypeMask & ASSET_SINGLE_READER == 0 {
+    return nil, fmt.Errorf("Cannot get reader, asset does not have a reader type")
+  }
+
+  if a.get_reader_func == nil {
+    return nil, fmt.Errorf("Cannot get reader, asset does not have a reader-getter function defined")
+  }
+
+  return a.get_reader_func(a)
+}
+
+
+func (a *Asset) GetWriter () (io.Writer, error) {
+  if ! a.IsSingle() {
+    return nil, fmt.Errorf("Cannot get writer, asset is not singular")
+  }
+
+  if a.TypeMask & ASSET_SINGLE_READER == 0 {
+    return nil, fmt.Errorf("Cannot get writer, asset does not have a writer type")
+  }
+
+  if a.get_writer_func == nil {
+    return nil, fmt.Errorf("Cannot get writer, asset does not have a writer-getter function defined")
+  }
+
+  return a.get_writer_func(a)
 }

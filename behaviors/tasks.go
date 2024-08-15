@@ -262,7 +262,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
     if err != nil { return err }
 
     for _, asset := range assets {
-      if asset.FileReadPath == "" {
+      if asset.FileSource == "" {
         s.EmitAsset(asset)
         continue
       }
@@ -283,7 +283,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
       err = os.MkdirAll(directory, os.ModePerm)
       if err != nil { return err }
 
-      err = os.Link(asset.FileReadPath, dest)
+      err = os.Link(asset.FileSource, dest)
       if err != nil { return err }
     }
   }
