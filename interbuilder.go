@@ -12,9 +12,6 @@ import (
 )
 
 
-type SpecProps map[string]any
-
-
 /*
   A Spec represents a node in a tree of concurrent user-defined
   operations which pass their output to their parents. They can
@@ -126,101 +123,6 @@ func (s *Spec) ResolveOther (o *Spec) error {
   }
 
   return nil
-}
-
-
-func (s *Spec) InheritProp (key string) (val any, found bool) {
-  if val, found = s.Props[key] ; found {
-    return val, found
-  }
-
-  if s.Parent == nil {
-    return nil, false
-  }
-
-  return s.Parent.InheritProp(key)
-}
-
-
-func (s *Spec) InheritPropString (key string) (value string, ok, found bool) {
-  value_any, found := s.InheritProp(key)
-  value,     ok     = value_any.(string)
-  return value, ok, found
-}
-
-
-func (s *Spec) GetProp (key string) (value any, found bool) {
-  if value, found := s.Props[key] ; found {
-    return value, found
-  }
-  return nil, false
-}
-
-
-func (s *Spec) GetPropBool (key string) (value bool, ok, found bool) {
-  value_any, found := s.Props[key]
-  value,     ok     = value_any.(bool)
-  return value, ok, found
-}
-
-
-func (s *Spec) InheritPropBool (key string) (value bool, ok, found bool) {
-  value_any, found := s.InheritProp(key)
-  value,     ok     = value_any.(bool)
-  return value, ok, found
-}
-
-
-func (s *Spec) GetPropString (key string) (value string, ok, found bool) {
-  value_any, found := s.Props[key]
-  value,     ok     = value_any.(string)
-  return value, ok, found
-}
-
-
-func (s *Spec) GetPropUrl (key string) (value *url.URL, ok, found bool) {
-  value_any, found := s.Props[key]
-  value,     ok     = value_any.(*url.URL)
-  return value, ok, found
-}
-
-
-func (s *Spec) RequireProp (key string) (value any, err error) {
-  value, found := s.Props[key]
-
-  if !found {
-    return nil, fmt.Errorf(
-      "Spec %s requires spec prop %s to exist",
-      s.Name, key,
-    )
-  }
-
-  return value, nil
-}
-
-
-func (s *Spec) RequirePropString (key string) (string, error) {
-  value_any, err := s.RequireProp(key)
-  if err != nil {
-    return "", err
-  }
-
-  value, ok := value_any.(string)
-  if !ok {
-    return "", fmt.Errorf(
-      "Spec %s requires spec prop %s to be a string, got %T",
-      s.Name, key, s.Props[key],
-    )
-  }
-
-  return value, nil
-}
-
-
-func (s *Spec) GetPropJson (key string) (value map[string]any, ok, found bool) {
-  value_any, found := s.Props[key]
-  value,     ok     = value_any.(map[string]any)
-  return value, ok, found
 }
 
 
