@@ -6,7 +6,7 @@ import "time"
 var TIMEOUT time.Duration = time.Second
 
 
-func wrapTimeout (t *testing.T, f func ()) {
+func TestWrapTimeout (t *testing.T, f func ()) {
   timeout := time.After(TIMEOUT)
   done    := make(chan bool)
 
@@ -24,7 +24,7 @@ func wrapTimeout (t *testing.T, f func ()) {
 }
 
 
-func wrapTimeoutError (t *testing.T, f func () error) {
+func TestWrapTimeoutError (t *testing.T, f func () error) {
   timeout := time.After(TIMEOUT)
   done    := make(chan bool)
 

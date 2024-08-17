@@ -27,7 +27,7 @@ func TaskSourceGitClone (s *Spec, t *Task) error {
   DownloaderMutex.Lock()
   defer DownloaderMutex.Unlock()
 
-  source, err := t.RequirePropURL("source")
+  source, err := s.RequirePropUrl("source")
   if err != nil { return err }
 
   if source.Scheme == "git" {
@@ -36,7 +36,7 @@ func TaskSourceGitClone (s *Spec, t *Task) error {
     source              = &source_copy
   }
 
-  source_dir, err := t.RequirePropString("source_dir")
+  source_dir, err := t.Spec.RequirePropString("source_dir")
   if err != nil { return err }
 
   source_dir, err = filepath.Abs(source_dir)
@@ -118,7 +118,7 @@ func TaskSourceInstallNodeJS (s *Spec, t *Task) error {
     return nil
   }
 
-  prop_install_cmd, ok, found := t.GetPropString("install_cmd")
+  prop_install_cmd, ok, found := s.GetPropString("install_cmd")
   if found && ok {
     install_cmd = strings.Split(prop_install_cmd, " ")
   }
@@ -239,7 +239,7 @@ func TaskEmit (s *Spec, t *Task) error {
 
 
 func TaskConsumeLinkFiles (s *Spec, task *Task) error {
-  source_dir, err := task.RequirePropString("source_dir")
+  source_dir, err := s.RequirePropString("source_dir")
   if err != nil { return err }
 
   // Remove directory contents, if it exists

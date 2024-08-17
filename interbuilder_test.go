@@ -52,7 +52,7 @@ func TestSpecDeferTaskIsNotCircular (t *testing.T) {
 func TestSpecEmptySingularRunFinishes (t *testing.T) {
   spec := NewSpec("single", nil)
   spec.Props["quiet"] = true
-  wrapTimeoutError(t, spec.Run)
+  TestWrapTimeoutError(t, spec.Run)
 }
 
 
@@ -65,7 +65,7 @@ func TestSpecEmptySingularRunEmitFinishes (t *testing.T) {
     return nil
   })
 
-  wrapTimeoutError(t, spec.Run)
+  TestWrapTimeoutError(t, spec.Run)
 }
 
 
@@ -79,7 +79,7 @@ func TestSpecChildRunEmitFinishes (t *testing.T) {
     return nil
   })
 
-  wrapTimeoutError(t, root.Run)
+  TestWrapTimeoutError(t, root.Run)
 }
 
 
@@ -100,7 +100,7 @@ func TestSpecTreeRunEmitFinishes (t *testing.T) {
     return nil
   })
 
-  wrapTimeoutError(t, root.Run)
+  TestWrapTimeoutError(t, root.Run)
 }
 
 
@@ -132,7 +132,7 @@ func TestSpecChildRunEmitConsumesAssetFinishes (t *testing.T) {
     return nil
   })
 
-  wrapTimeoutError(t, root.Run)
+  TestWrapTimeoutError(t, root.Run)
 }
 
 
@@ -233,7 +233,7 @@ func TestSpecChainTransformAssetPaths (t *testing.T) {
     return nil
   })
 
-  wrapTimeoutError(t, root.Run)
+  TestWrapTimeoutError(t, root.Run)
 
   if produce_assets_started == false {
     t.Fatal("Task produce-assets not started")

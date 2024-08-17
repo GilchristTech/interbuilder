@@ -229,5 +229,3 @@ func (t *Task) Run (s *Spec) error {
   t.Started = true
   return t.Func(s, t)
 }
-
-

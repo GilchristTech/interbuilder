@@ -97,7 +97,7 @@ func TestAssetExpandGenerator (t *testing.T) {
   // termination, wrap this in a timeout in case the generator
   // doesn't terminate.
   //
-  wrapTimeout(t, func () {
+  TestWrapTimeout(t, func () {
     var test_url, _      = url.Parse("ib://testing/mask")
     var type_mask uint64 = ASSET_MULTI_GENERATOR
     var base_url         = test_url.JoinPath(strconv.FormatUint(type_mask, 2))
@@ -144,6 +144,7 @@ func TestAssetExpandGenerator (t *testing.T) {
 
 
 func TestSpecPathExists (t *testing.T) {
+  var err error
   var source_dir string = t.TempDir()
 
   root := NewSpec("root", nil)
@@ -152,10 +153,10 @@ func TestSpecPathExists (t *testing.T) {
   // Make the file
   //
   var file_path = filepath.Join(source_dir, "exists.txt")
-  os.WriteFile(file_path, []byte("Test file!"), 0o660)
+  err = os.WriteFile(file_path, []byte("Test file!"), 0o660)
+  if err != nil { t.Fatal(err) }
 
   var exists bool
-  var err    error
 
   // Test case where the path does exist
   //

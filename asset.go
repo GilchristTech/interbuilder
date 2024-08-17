@@ -10,6 +10,7 @@ import (
   "path/filepath"
   "strings"
   "io/fs"
+  "mime"
 )
 
 
@@ -44,6 +45,11 @@ type Asset struct {
   Spec      *Spec
 
   Mimetype  string
+
+  // Content
+  //
+  ContentModified bool
+  ContentBytes    []byte
 
   // IO handling
   //
@@ -338,6 +344,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     // This asset is a file. Populate it with callbacks for IO handling
 
     asset.TypeMask |= ASSET_SINGLE_READER | ASSET_SINGLE_WRITER
+    asset.Mimetype  = mime.TypeByExtension(filepath.Ext(file_path))
 
     asset.get_reader_func = func (a *Asset) (io.Reader, error) {
       return os.Open(a.FileSource)
@@ -346,8 +353,6 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     asset.get_writer_func = func (a *Asset) (io.Writer, error) {
       return os.Create(a.FileSource)
     }
-
-    //asset.get_writer_func
   }
 
   return &asset, nil
@@ -418,4 +423,31 @@ func (a *Asset) GetWriter () (io.Writer, error) {
   }
 
   return a.get_writer_func(a)
+}
+
+
+func (a *Asset) GetContentBytes () ([]byte, error) {
+  if a.ContentBytes != nil {
+    return a.ContentBytes, nil
+  }
+
+  reader, err := a.GetReader()
+  if err != nil { return nil, err }
+
+  bytes, err := io.ReadAll(reader)
+  if err != nil { return nil, err }
+
+  a.ContentBytes = bytes
+  return bytes, nil
+}
+
+
+func (a *Asset) SetContentBytes (content []byte) error {
+  if ! a.IsSingle() {
+    return fmt.Errorf("Asset is not singular")
+  }
+
+  a.ContentBytes = content
+  a.ContentModified = true
+  return nil
 }

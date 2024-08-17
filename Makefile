@@ -5,7 +5,7 @@ CMD        := interbuilder
 DEPS_CHECK = .deps_checked
 COVERAGE_FILE = coverage.out
 
-WATCHER := npx nodemon -w . -w Makefile -e go,mod,json -i build/ -x
+WATCHER := npx nodemon -w . -w Makefile -e go,mod,sum,json -i .deps_checked -i build/ -x
 
 $(CMD): $(DEPS_CHECK) $(CMD_SRC) $(MODULE_SRC)
 	go build -o $(CMD) $(CMD_SRC)
