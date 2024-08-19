@@ -54,6 +54,7 @@ type Asset struct {
   // IO handling
   //
   FileSource string
+  FileDest   string
 
   // Asset types: An asset struct can represent a singular asset, an array of
   // assets, or a lazy asset generator.
@@ -284,6 +285,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     Mimetype:     mimetype,
     TypeMask:     type_mask,
     FileSource:   file_path,
+    FileDest:     file_path,
   }
 
   if is_dir {
@@ -351,11 +353,46 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     }
 
     asset.get_writer_func = func (a *Asset) (io.Writer, error) {
-      return os.Create(a.FileSource)
+      if a.FileDest == "" {
+        return nil, fmt.Errorf("FileDest in asset %s not defined", a.Url)
+      }
+
+      var directory, _ = path.Split(a.FileDest)
+
+      err = os.MkdirAll(directory, os.ModePerm)
+      if err != nil { return nil, err }
+
+      return os.Create(a.FileDest)
     }
   }
 
   return &asset, nil
+}
+
+
+func (s *Spec) AnnexAsset (a *Asset) (*Asset) {
+  // Create a shallow copy of the asset
+  //
+  var annexed   Asset = *a
+  var new_url url.URL = *a.Url
+
+  annexed.Url        = & new_url
+  annexed.Url.Scheme = a.Url.Scheme
+
+  // Calculate file write path
+  //
+  source_dir, _ := s.RequireInheritPropString("source_dir")
+  var key string = annexed.Url.Path
+
+  if strings.HasPrefix(key, "@emit") {
+    key = key[ len("@emit") : ]
+  } else if strings.HasPrefix(key, "/@emit") {
+    key = key[ len("/@emit") : ]
+  }
+
+  annexed.FileDest = filepath.Join(source_dir, key)
+
+  return &annexed
 }
 
 

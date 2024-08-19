@@ -1,7 +1,6 @@
 package interbuilder
 
 import (
-  "log"
   "fmt"
   "sync"
   "net/url"
@@ -434,7 +433,7 @@ func (s *Spec) Run () error {
     // Assert a valid task queue, going forward
     //
     if t := s.Tasks.GetCircularTask(); t != nil {
-      log.Fatalf(
+      return fmt.Errorf(
         "[%s] Error: repeating (circular) task entry in task list: %s\n",
         s.Name, t.ResolverId,
       )
@@ -444,13 +443,17 @@ func (s *Spec) Run () error {
     //
     s.Printf("[%s] task: %s (%s)\n", s.Name, task.Name, task.ResolverId)
     if err := task.Run(s); err != nil {
-      s.Printf(
-        "[%s/%s] Error in task %s (%s):\n%s\n",
-        s.Name, task.Name,
-        task.ResolverId,
-        s.Name, err,
-      )
-      return err
+      if task.ResolverId != "" {
+        return fmt.Errorf(
+          "[%s/%s] Error in task (%s): %w\n",
+          s.Name, task.Name, task.ResolverId, err,
+        )
+      } else {
+        return fmt.Errorf(
+          "[%s/%s] Error in task: %w\n",
+          s.Name, task.Name, err,
+        )
+      }
     }
 
     // Flush the push queue and advance to the next task
