@@ -8,7 +8,69 @@ import (
   "os"
   "fmt"
   "io"
+  "time"
 )
+
+
+func TestAssetExtendHistory (t *testing.T) {
+  var asset_url, _     = url.Parse("ib://test/@emit/asset.txt")
+  // var updated_url, _ = url.Parse("ib://test/@emit/new-asset.txt")
+  var history_b_url, _ = url.Parse("ib://spec/")
+
+  var history_a = HistoryEntry { Url: asset_url,     Time: time.Now() }
+  var history_b = HistoryEntry { Url: history_b_url, Time: time.Now() }
+
+  var asset = & Asset {
+    Url:     asset_url,
+    History: & history_a,
+  }
+
+  // Test case: unmodified Asset.ExtendHistory with no arguments
+  //
+  var expanded_a *HistoryEntry = asset.ExtendHistory()
+
+  if len(expanded_a.Parents) != 1 || expanded_a.Parents[0] != &history_a {
+    t.Fatal("Expanded history is not exclusively a pointer to the previous history entry")
+  }
+
+  if ! expanded_a.Time.After(history_a.Time) {
+    t.Error("Expanded history time is not greater than parent's time")
+  }
+
+  if got, expected := expanded_a.Url.String(), asset_url.String(); got != expected {
+    t.Errorf("Expanded URL is not the asset URL, expected %s, got %s", expected, got)
+  }
+
+  // Test case: unmodified Asset.ExtendHistory with a parent argument
+  //
+  var expanded_b *HistoryEntry = asset.ExtendHistory(&history_b)
+
+  if length := len(expanded_b.Parents); length != 2 {
+    t.Fatalf("Expanded history does not have two parents, got %d", length)
+  }
+
+  for _, parent := range expanded_b.Parents {
+    if ! expanded_b.Time.After(parent.Time) {
+      t.Error("Expanded history time is not greater than a parent's time")
+    }
+
+    parent_url := parent.Url.String()
+
+    expected_urls := make(map[string]bool)
+    expected_urls[asset_url.String()] = true
+    expected_urls[history_b_url.String()] = true
+
+    if _, parent_url_found := expected_urls[parent_url]; !parent_url_found {
+      var expected_urls_text string
+      for expected_url, _ := range expected_urls {
+        expected_urls_text += "\n  " + expected_url
+      }
+      t.Errorf("Unexpected parent URL: %s; expected URLs:%s", parent_url, expected_urls_text)
+    }
+  }
+
+  // TODO: test cases where asset URL has been modified
+}
 
 
 func TestAssetExpandSingular (t *testing.T) {
@@ -299,4 +361,100 @@ func TestSpecMakeFileKeyAssetValidDirectory (t *testing.T) {
   }
 
   // TODO: test reading the file and assert its content
+}
+
+
+func TestSpecAnnexAsset (t *testing.T) {
+  var spec_a  *Spec  = NewSpec("a", nil)
+  var spec_b  *Spec  = NewSpec("b", nil)
+  var asset   *Asset = spec_a.MakeAsset("asset.txt")
+
+  var asset_original_url = asset.Url.String()
+
+  var annexed *Asset = spec_b.AnnexAsset(asset)
+
+  // Assert the annexed asset and the original are different pointers
+  //
+  if asset == annexed {
+    t.Fatalf("Annexed asset is the same as the original")
+  }
+
+  // Assert the annexed URL was updated
+  //
+  if got, expected := annexed.Url.Host, spec_b.Url.Host; got != expected {
+    t.Errorf("Annexed asset hostname is not %s, got %s", expected, got)
+  }
+
+  // Assert the original asset URL is unmodified
+  //
+  if got := asset.Url.String(); got != asset_original_url {
+    t.Errorf("Original asset URL is %s, expected %s", got, asset_original_url)
+  }
+
+  // Assert there is new history
+  //
+  if got := annexed.History; got == nil || got == asset.History {
+    t.Errorf("Annexed asset does not have new history")
+  }
+}
+
+
+func TestAssetGetSetContentBytes (t *testing.T) {
+  var asset = & Asset {
+    TypeMask: ASSET_QUANTITY_SINGLE,
+  }
+
+  // Read empty asset
+  //
+  if bytes, err := asset.GetContentBytes(); err != nil {
+    t.Error(err)
+  } else if bytes != nil {
+    t.Errorf("Expected bytes to be nil, got \"%s\"", string(bytes))
+  }
+
+  // Write asset content
+  //
+  if err := asset.SetContentBytes([]byte("value")); err != nil {
+    t.Fatal(err)
+  }
+
+  if asset.ContentModified != true {
+    t.Errorf("Asset Modified flag not true")
+  }
+
+  // Reread and assert asset content
+  //
+  if bytes, err := asset.GetContentBytes(); err != nil {
+    t.Error(err)
+  } else if got, expected := string(bytes), "value"; got != expected {
+    t.Errorf("Expected content to have a value of \"%s\", got \"%s\"", expected, got)
+  }
+}
+
+
+func TestFileAssetGetContentBytes (t *testing.T) {
+  var err        error
+  var source_dir string = t.TempDir()
+  var spec       *Spec  = NewSpec("spec", nil)
+  spec.Props["source_dir"] = source_dir
+
+  var file_path  string = filepath.Join(source_dir, "file.txt")
+
+  err = os.WriteFile(file_path, []byte("This is a text file!"), 0o660)
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  var asset *Asset
+  var content []byte
+
+  asset, err = spec.MakeFileKeyAsset("file.txt")
+  
+  if content, err = asset.GetContentBytes(); err != nil {
+    t.Fatal(err)
+  }
+
+  if got, expected := string(content), "This is a text file!"; got != expected {
+    t.Fatalf("File content expected to be %s, got %s", expected, got)
+  }
 }

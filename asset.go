@@ -76,10 +76,22 @@ type Asset struct {
 }
 
 
+/*
+  Creates a new history entry, meant to represent a departure
+  from this asset in its history tree. This asset's history entry
+  is the first of the parents, and more can be supplied through
+  variadic arguments.
+*/
 func (a *Asset) ExtendHistory (add_parents ...*HistoryEntry) *HistoryEntry {
-  parents := make([]*HistoryEntry, 0, 1+len(add_parents))
-  parents  = append(parents, a.History)
-  parents  = append(parents, add_parents...)
+  var parents []*HistoryEntry
+
+  if len(add_parents) == 0 {
+    parents = []*HistoryEntry { a.History }
+  } else {
+    parents = make([]*HistoryEntry, 0, 1+len(add_parents))
+    parents = append(parents, a.History)
+    parents = append(parents, add_parents...)
+  }
 
   return & HistoryEntry {
     Url:     a.Url,
@@ -234,6 +246,25 @@ func (s *Spec) EmitFileKey (file_path string, key_parts ...string) error {
 }
 
 
+func (s *Spec) MakeAsset (key string) *Asset {
+  var asset_url *url.URL = s.MakeUrl(key)
+
+  var history = HistoryEntry {
+    Url:     asset_url,
+    Parents: [] *HistoryEntry { &s.History },
+    Time:    time.Now(),
+  }
+
+  var asset = Asset {
+    Url:     asset_url,
+    Spec:    s,
+    History: &history,
+  }
+
+  return &asset
+}
+
+
 /*
   Relative to this Spec's `source_dir` path, look for a file at
   `source_path`, and create a filesystem asset with a URL key at
@@ -273,7 +304,6 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     Parents: [] *HistoryEntry { &s.History },
     Time:    time.Now(),
   }
-
 
   // TODO: specify means of singular access
   var type_mask uint64 = ASSET_TYPE_UNDEFINED
@@ -371,13 +401,13 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
 
 
 func (s *Spec) AnnexAsset (a *Asset) (*Asset) {
-  // Create a shallow copy of the asset
+  // Create a shallow copy of the asset and update the URL
   //
   var annexed   Asset = *a
   var new_url url.URL = *a.Url
 
-  annexed.Url        = & new_url
-  annexed.Url.Scheme = a.Url.Scheme
+  new_url.Host = s.Url.Host
+  annexed.Url  = & new_url
 
   // Calculate file write path
   //
@@ -391,6 +421,16 @@ func (s *Spec) AnnexAsset (a *Asset) (*Asset) {
   }
 
   annexed.FileDest = filepath.Join(source_dir, key)
+
+  var history_parents = make([]*HistoryEntry, 2, 2)
+  history_parents[0] = a.History
+  history_parents[1] = & s.History
+
+  annexed.History = & HistoryEntry {
+    Url:     annexed.Url,
+    Parents: history_parents,
+    Time:    time.Now(),
+  }
 
   return &annexed
 }
@@ -464,18 +504,26 @@ func (a *Asset) GetWriter () (io.Writer, error) {
 
 
 func (a *Asset) GetContentBytes () ([]byte, error) {
+  if ! a.IsSingle() {
+    return nil, fmt.Errorf("Asset is not singular")
+  }
+
   if a.ContentBytes != nil {
     return a.ContentBytes, nil
   }
 
-  reader, err := a.GetReader()
-  if err != nil { return nil, err }
+  if a.get_reader_func != nil {
+    reader, err := a.GetReader()
+    if err != nil { return nil, err }
 
-  bytes, err := io.ReadAll(reader)
-  if err != nil { return nil, err }
+    bytes, err := io.ReadAll(reader)
+    if err != nil { return nil, err }
 
-  a.ContentBytes = bytes
-  return bytes, nil
+    a.ContentBytes = bytes
+    return bytes, nil
+  }
+
+  return nil, nil
 }
 
 
