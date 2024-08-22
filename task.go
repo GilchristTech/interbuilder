@@ -150,6 +150,11 @@ func (t *Task) Insert (i *Task) *Task {
 }
 
 
+func (t *Task) Append (a *Task) *Task {
+  return t.End().Insert(a)
+}
+
+
 func (t *Task) insertRange (i_start, i_end *Task) *Task {
   i_end.Next = t.Next
   t.Next = i_start

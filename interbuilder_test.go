@@ -3,6 +3,7 @@ package interbuilder
 import (
   "testing"
   "fmt"
+  "strings"
 )
 
 
@@ -241,5 +242,40 @@ func TestSpecChainTransformAssetPaths (t *testing.T) {
 
   if produce_assets_finished == false {
     t.Fatal("Task produce-assets not finished")
+  }
+}
+
+
+func TestSprintSpec (t *testing.T) {
+  var root    *Spec = NewSpec("root", nil)
+  var subspec *Spec = root.AddSubspec(NewSpec("subspec", nil))
+
+  root.Props["root_prop"] = 1
+  root.EnqueueTaskFunc("root_task", func (s *Spec, task *Task) error { return nil })
+
+  subspec.Props["subspec_prop"] = true
+
+  // Progress through the SprintSpec output, checking for
+  // expected, ordered string occurence.
+  //
+  var specs_string string = SprintSpec(root)
+
+  var expected_strings = [] string {
+    "ib://root",
+    "root_prop", "int", "1",
+    "root_task",
+    "\n",
+    "ib://subspec",
+    "subspec_prop", "bool", "true",
+  }
+
+  var specs_scan = specs_string
+
+  for _, expected := range expected_strings {
+    var index = strings.Index(specs_scan, expected)
+    if index == -1 {
+      t.Errorf("Did not find expected substring: %s", expected)
+    }
+    specs_scan = specs_scan[index + len(expected) :]
   }
 }

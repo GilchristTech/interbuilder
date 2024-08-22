@@ -8,6 +8,7 @@ import (
   "time"
   "reflect"
   "runtime"
+  "io"
 )
 
 
@@ -157,6 +158,10 @@ func (s *Spec) AddOutputSpec (o *Spec) {
 }
 
 
+/*
+  Searches this Spec, and recursively through its parents, for a
+  TaskResolver with a specific ID. Returns nil if none is found
+*/
 func (s *Spec) GetTaskResolverById (id string) *TaskResolver {
   for tr := s.TaskResolvers ; tr != nil ; tr = tr.Next {
     if r := tr.GetTaskResolverById(id); r != nil {
@@ -172,6 +177,10 @@ func (s *Spec) GetTaskResolverById (id string) *TaskResolver {
 }
 
 
+/*
+  Append a TaskResolver to this Spec, taking priority over
+  previously-added and parental resolvers
+*/
 func (s *Spec) AddTaskResolver (tr *TaskResolver) {
   var end *TaskResolver
   for end = tr ; end.Next != nil ; end = end.Next {}
@@ -208,6 +217,15 @@ func (s *Spec) GetTask (name string, spec *Spec) (*Task, error) {
 }
 
 
+func (s *Spec) NewTaskFunc (name string, f TaskFunc) *Task {
+  return & Task {
+    Spec: s,
+    Name: name,
+    Func: f,
+  }
+}
+
+
 /*
   Insert a task into the task queue, before deferred tasks.
   Enqueued tasks are executed in first-in, first-out order, like
@@ -237,14 +255,13 @@ func (s *Spec) EnqueueTask (t *Task) *Task {
 }
 
 
+/*
+  EnqueueTaskFunc creates a new Task with the specified name and
+  function (`f`), enqueues it for execution in the task queue,
+  and returns it.
+*/
 func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) *Task {
-  var task = Task {
-    Spec: s,
-    Name: name,
-    Func: f,
-  }
-
-  return s.EnqueueTask(&task)
+  return s.EnqueueTask(s.NewTaskFunc(name, f))
 }
 
 
@@ -261,6 +278,12 @@ func (s *Spec) DeferTask (t *Task) *Task {
 
   end := t.End()
 
+  // If the spec tasks list is not yet defined, enqueued tasks
+  // should still be executed before deferred tasks, so define
+  // the tasks list, but do not define an end to the enqueue
+  // point. This will cause enqueuing to insert into the top of
+  // the task list.
+  //
   if s.Tasks == nil {
     s.Tasks = t
     s.tasks_enqueue_end = nil
@@ -276,11 +299,24 @@ func (s *Spec) DeferTask (t *Task) *Task {
 
 
 /*
-  Push a Task into the push queue. In the task execution loop,
-  before items are executed, tasks in the push queue are flushed
-  and inserted into the main task queue to be executed before
-  other tasks. In this sense, the main task queue executes like a
-  stack rather than a queue. Return the final inserted item.
+  DeferTaskFunc creates a new Task with the specified name and
+  function (`f`), defers it for execution in the task queue,
+  and returns it.
+*/
+func (s *Spec) DeferTaskFunc (name string, f TaskFunc) *Task {
+  return s.DeferTask(s.NewTaskFunc(name, f))
+}
+
+
+
+/*
+  PushTask adds a Task to the push queue. The push queue is a
+  temporary holding area for tasks that need to be executed
+  immediately before other tasks in the main queue. When the task
+  execution loop begins, and after each tasks, all tasks in the
+  push queue are flushed into the main task queue to be executed
+  next. This function returns the final inserted item in the push
+  queue.
 */
 func (s *Spec) PushTask (t *Task) *Task {
   end := t.End()
@@ -296,6 +332,23 @@ func (s *Spec) PushTask (t *Task) *Task {
 }
 
 
+/*
+  PushTaskFunc creates a new Task with the specified name and
+  function (`f`), pushs it for execution in the task queue,
+  and returns it.
+*/
+func (s *Spec) PushTaskFunc (name string, f TaskFunc) *Task {
+  return s.PushTask(s.NewTaskFunc(name, f))
+}
+
+
+/*
+  EnqueueTaskName retrieves a Task by its name and enqueues it
+  for execution. If the task is found, it is added to the task
+  queue and the last inserted Task is returned.  If the task
+  cannot be found, it is returned as nil. If an error occurs, an
+  error is returned.
+*/
 func (s *Spec) EnqueueTaskName (name string) (*Task, error) {
   task, err := s.GetTask(name, s)
   if task == nil || err != nil {
@@ -304,12 +357,20 @@ func (s *Spec) EnqueueTaskName (name string) (*Task, error) {
   return s.EnqueueTask(task), nil
 }
 
-
+ 
+/*
+  EnqueueUniqueTask enqueues a Task only if there isn't already a
+  task with the same name in the task queue. If a task with the
+  same name already exists, it returns the existing task without
+  modifying the task queue. Otherwise, it enqueues the provided
+  task and returns the final enqueued Task.
+*/
 func (s *Spec) EnqueueUniqueTask (t *Task) (*Task, error) {
   if t.Name == "" {
     return nil, fmt.Errorf("EnqueueUniqueTask error: task's name is empty")
   }
 
+  // TODO: check the push queue for matching tasks
   existing_task := s.GetTaskFromQueue(t.Name)
   if existing_task != nil {
     return existing_task, nil
@@ -319,6 +380,12 @@ func (s *Spec) EnqueueUniqueTask (t *Task) (*Task, error) {
 }
 
 
+/*
+  EnqueueUniqueTaskName enqueues a Task by its name only if there isn't
+  already a task with the same name in the task queue. If a task with
+  the same name already exists, it returns the existing task without
+  enqueuing a new one.
+*/
 func (s *Spec) EnqueueUniqueTaskName (name string) (*Task, error) {
   existing_task := s.GetTaskFromQueue(name)
   if existing_task != nil {
@@ -328,7 +395,13 @@ func (s *Spec) EnqueueUniqueTaskName (name string) (*Task, error) {
 }
 
 
+/*
+  GetTaskFromQueue searches the task queue for a task with
+  the specified name and returns it. If no such task is found, it
+  returns nil.
+*/
 func (s *Spec) GetTaskFromQueue (name string) *Task {
+  // TODO: check the push queue
   for task := s.Tasks ; task != nil ; task = task.Next {
     if task.Name == name {
       return task
@@ -483,20 +556,20 @@ func (s *Spec) Run () error {
 }
 
 
-func PrintSpec (s *Spec, level int) {
-  tab     := "  "
-  align_0 := strings.Repeat(tab, level)
-  align_1 := align_0 + tab
-  align_2 := align_1 + tab
+func specFormat (w io.Writer, s *Spec, level int) {
+  var tab     string = "  "
+  var align_0 string = strings.Repeat(tab, level)
+  var align_1 string = align_0 + tab
+  var align_2 string = align_1 + tab
 
-  fmt.Print(align_0, s.Url, "\n")
+  fmt.Fprint(w, align_0, s.Url, "\n")
 
   // Properties
   //
   if len(s.Props) > 0 {
-    fmt.Print(align_1, "Properties:\n")
+    fmt.Sprint(w, align_1, "Properties:\n")
     for key, value := range s.Props {
-      fmt.Printf("%s%s  \t%T  \t%s\n", align_2, key, value, value)
+      fmt.Fprintf(w, "%s%s  \t%T  \t%v\n", align_2, key, value, value)
     }
   }
 
@@ -507,7 +580,7 @@ func PrintSpec (s *Spec, level int) {
 
   for task := s.Tasks ; task != nil ; task = task.Next {
     if heading_printed == false {
-      fmt.Print(align_1, "Tasks:\n")
+      fmt.Fprint(w, align_1, "Tasks:\n")
       heading_printed = true
     }
     bullet := "-"
@@ -519,20 +592,34 @@ func PrintSpec (s *Spec, level int) {
     //
     _, found := task_pointers[task]
     if found {
-      fmt.Printf("%s%s %s (%s)  WARNING: circular task list\n", align_2, bullet, task.Name, task.ResolverId)
+      fmt.Fprintf(w, "%s%s %s (%s)  WARNING: circular task list\n", align_2, bullet, task.Name, task.ResolverId)
       break
     }
     task_pointers[task] = true
 
-    fmt.Printf("%s%s %s (%s)\n", align_2, bullet, task.Name, task.ResolverId)
+    fmt.Fprintf(w, "%s%s %s (%s)\n", align_2, bullet, task.Name, task.ResolverId)
   }
 
   // Subspecs
   //
   if len(s.Subspecs) > 0 {
-    fmt.Print(align_1, "Subspecs:\n")
+    fmt.Fprint(w, align_1, "Subspecs:\n")
     for _, subspec := range s.Subspecs {
-      PrintSpec(subspec, level+2)
+      specFormat(w, subspec, level+2)
     }
   }
+}
+
+
+func SprintSpec (s *Spec) string {
+  var builder strings.Builder
+  specFormat(&builder, s, 0)
+  return builder.String()
+}
+
+
+func PrintSpec (s *Spec) (n int, err error){
+  var builder strings.Builder
+  specFormat(&builder, s, 0)
+  return fmt.Println(builder.String())
 }

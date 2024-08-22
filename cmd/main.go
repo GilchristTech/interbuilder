@@ -54,5 +54,5 @@ func main () {
     log.Panic(err)
   }
 
-  PrintSpec(root, 0)
+  PrintSpec(root)
 }
