@@ -187,6 +187,25 @@ func (s *Spec) GetKeyPath (k string) (string, error) {
 }
 
 
+/*
+  WriteFile writes data to a file using os.WriteFile, except the a
+  file key local to the spec's source dir is resolved into a file
+  path.
+*/
+func (s *Spec) WriteFile (key string, data []byte, perm fs.FileMode) error {
+  file_path, err := s.GetKeyPath(key)
+  if err != nil { return err }
+
+  dir_path, _ := filepath.Split(file_path)
+  
+  if err := os.MkdirAll(dir_path, os.ModePerm); err != nil {
+    return err
+  }
+
+  return os.WriteFile(file_path, data, perm)
+}
+
+
 func (s *Spec) EmitAsset (a *Asset) error {
   if a.Url == nil {
     return fmt.Errorf("Cannot emit asset with a nil URL")

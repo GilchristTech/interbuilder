@@ -16,6 +16,121 @@ import (
 )
 
 
+func TestTaskInferSourceNodeJS (t *testing.T) {
+  var root      *Spec = NewSpec("root", nil)
+  var node_spec *Spec = root.AddSubspec(NewSpec("node_spec", nil))
+
+  root.AddSpecResolver(ResolveTaskInferSource)
+  root.AddSpecResolver(ResolveTasksNodeJS)
+
+  node_spec.Props["source_dir"] = t.TempDir()
+
+  var root_package_json_src = []byte(/* package.json */`{
+    "name": "interbuilder-test-npm-task",
+    "type": "module",
+    "scripts": {
+      "start": "node main.js",
+      "build": "node main.js"
+    },
+    "dependencies": {
+      "my-module": "file:module-package"
+    }
+  }`)
+
+  var module_package_json_src = []byte(/* ./module-package/main.js */`{
+    "name": "my-module",
+    "type": "module",
+    "exports": {
+      ".": {
+        "require": "./main.js",
+        "import":  "./main.js"
+      }
+    }
+  }`)
+
+  var root_main_js_src = []byte(/* main.js */`
+    import fs   from 'fs';
+    import path from 'path';
+
+    import * as MyModule from "my-module"
+
+    // Define the directory and file paths
+    const dir_path  = path.join(".", "dist");
+    const file_path = path.join(dir_path, "file.txt");
+
+    // Create the dist/ directory if it doesn't exist
+    if (!fs.existsSync(dir_path)) {
+        fs.mkdirSync(dir_path, { recursive: true });
+    }
+
+    fs.writeFileSync(file_path, MyModule.content);
+
+    console.log("File created at:", file_path);
+  `)
+
+  var module_main_js_src = []byte(/* module-package/main.js */`
+    export const content = "hello world";
+  `)
+
+  // Write the package.json and main.js for the root module,
+  // which is the main entrypoint for the test.
+  //
+  var err error
+  err = node_spec.WriteFile("package.json", root_package_json_src,   0o660)
+  if err != nil { t.Fatal(err) }
+  err = node_spec.WriteFile("main.js", root_main_js_src, 0o660)
+  if err != nil { t.Fatal(err) }
+
+  // Write the package.json and main.js for my-module, a
+  // dependancy of the root module. The test will fail if this is
+  // not installed and read from by the root module.
+  //
+  node_spec.WriteFile("module-package/package.json", module_package_json_src, 0o660)
+  if err != nil { t.Fatal(err) }
+  node_spec.WriteFile("module-package/main.js", module_main_js_src, 0o660)
+  if err != nil { t.Fatal(err) }
+
+  if err := root.Resolve(); err != nil {
+    t.Fatal("Could not resolve root spec:", err)
+  }
+
+  node_spec.EnqueueTaskName("source-infer")
+
+  // Run a task to assert the content of the files emitted by the
+  // Node build Spec.
+  //
+  var num_assets int = 0
+  root.EnqueueTaskFunc("consume-dist", func (s *Spec, tk *Task) error {
+    for asset_chunk := range s.Input {
+      assets, err := asset_chunk.Expand() // TODO: assets.Flatten
+      if err != nil { return err }
+
+      for _, asset := range assets {
+        num_assets++
+        if asset.Url.Path != "@emit/file.txt" {
+          t.Fatal(asset.Url.String())
+        }
+
+        if content_bytes, err := asset.GetContentBytes(); err != nil {
+          t.Fatal(err)
+        } else if got, expect := string(content_bytes), "hello world"; got != expect {
+          t.Fatalf("Asset content is \"%s\", expected \"%s\"", got, expect)
+        }
+      }
+    }
+    return nil
+  })
+
+  if err := root.Run(); err != nil {
+    t.Fatal(err)
+  }
+
+  if expect, got := 1, num_assets; got != expect {
+    t.Fatalf("Expected %d assets, got %d", expect, got)
+  }
+}
+
+
 func TestTaskConsumeLinkFilesSingularFiles (t *testing.T) {
   // Create root spec
   //

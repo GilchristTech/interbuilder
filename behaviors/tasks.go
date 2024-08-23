@@ -112,9 +112,13 @@ func TaskSourceInstallNodeJS (s *Spec, t *Task) error {
   DownloaderMutex.Lock()
   defer DownloaderMutex.Unlock()
 
-  install_cmd := [] string {"npm", "ci"}
+  install_cmd := [] string {"npm", "i"}
 
-  if exists, _ := s.PathExists("node_modules"); exists {
+  if lock_exists, _ := s.PathExists("package.lock"); lock_exists {
+    install_cmd[1] = "ci"
+  }
+
+  if node_modules_exists, _ := s.PathExists("node_modules"); node_modules_exists {
     return nil
   }
 
@@ -181,60 +185,6 @@ func TaskSourceBuildNodeJS (s *Spec, t *Task) error {
   }
 
   return nil
-}
-
-
-func TaskEmit (s *Spec, t *Task) error {
-  return nil
-
-  /*
-  var emit_any any
-  emit_any, found := t.GetProp("emit")
-
-  if !found {
-    return nil
-  }
-
-  for {
-    switch emit := emit_any.(type) {
-    case string:
-    case []any:
-    case [] map[string]any:
-    }
-
-    if _, ok := emit_any.([] map[string]any); ok {
-      break
-    }
-  }
-
-  var emit_file []string = emit_any.([]string)
-
-  for _, file := range emit_files {
-    asset_url := s.MakeUrl("emit", file_key)
-
-    var history = HistoryEntry {
-      Url:     asset_url,
-      Parents: [] *HistoryEntry { t.History },
-      Time:    time.Now(),
-    }
-
-    var a = Asset {
-      Url:      asset_url,
-      History:  HistoryEntry,
-      Spec:     s,
-      MimeType: "inode/directory",
-      Size:     -1,
-      CanRead:  false,
-    }
-
-    // Read emit prop and subproperties
-    // If emitting just a single directory, emit
-
-    s.Emit()
-  }
-
-  return  nil
-  */
 }
 
 
