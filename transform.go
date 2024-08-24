@@ -84,6 +84,8 @@ func (pt *PathTransformation) MatchString (m string) bool {
 
 
 func (pt *PathTransformation) TransformPath (src string) string {
+  // TODO: path transformations can mess up URL directives, like @emit. These directives should be split from a path prior to applying transformations.
+
   if pt.Matcher != nil && !pt.Matcher.MatchString(src) {
     return src
   }

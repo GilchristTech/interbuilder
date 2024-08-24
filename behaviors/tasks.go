@@ -43,7 +43,7 @@ func TaskSourceGitClone (s *Spec, t *Task) error {
   if err != nil { return err }
 
   // Check whether source directory already exists;
-  // exist if it exists or an error occurred.
+  // exit if it exists or if an error occurred.
   // TODO: check for .git/ existence and `git status --porcelain`
   //
   if exists, err := s.PathExists("./"); exists || err != nil {
@@ -212,6 +212,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
     if err != nil { return err }
 
     for _, asset := range assets {
+      task.Println(asset.Url.String())
       if asset.FileSource == "" {
         s.EmitAsset(asset)
         continue

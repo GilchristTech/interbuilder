@@ -102,13 +102,16 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
   var num_assets int = 0
   root.EnqueueTaskFunc("consume-dist", func (s *Spec, tk *Task) error {
     for asset_chunk := range s.Input {
+      tk.Println("Asset chunk:", asset_chunk.Url)
       assets, err := asset_chunk.Expand() // TODO: assets.Flatten
       if err != nil { return err }
 
       for _, asset := range assets {
         num_assets++
-        if asset.Url.Path != "@emit/file.txt" {
-          t.Fatal(asset.Url.String())
+        var asset_url_path string = strings.TrimLeft(asset.Url.Path, "/")
+
+        if got, expect := asset_url_path, "@emit/file.txt"; got != expect {
+          t.Fatalf("Unexpected asset path: %s in URL %s, expected %s", asset.Url.Path, asset.Url, expect)
         }
 
         if content_bytes, err := asset.GetContentBytes(); err != nil {
@@ -457,5 +460,85 @@ func TestTaskTransformHtml (t *testing.T) {
       "Expected to walk %d files in root spec source dir (%s), walked %d",
       expected, root_source_dir, root_spec_files_walked,
     )
+  }
+}
+
+
+func TestTaskConsumeLinkFilesWithPathTransformations (t *testing.T) {
+  var err error
+  var root       *Spec = NewSpec("root", nil)
+  var merge      *Spec = root.AddSubspec(NewSpec("merge", nil))
+  var producer_a *Spec = merge.AddSubspec(NewSpec("producer_a", nil))
+  var producer_b *Spec = merge.AddSubspec(NewSpec("producer_b", nil))
+
+  merge.Props["source_dir"]      = t.TempDir()
+  producer_a.Props["source_dir"] = t.TempDir()
+  producer_b.Props["source_dir"] = t.TempDir()
+
+  // Producer A and B should transform their paths
+  //
+  producer_a.PathTransformations, err = PathTransformationsFromAny("s`^/?`/a/`")
+  if err != nil { t.Fatal(err) }
+  producer_b.PathTransformations, err = PathTransformationsFromAny("s`^/?`/b/`")
+  if err != nil { t.Fatal(err) }
+
+  // Producer tasks
+  //
+  var produce_func = func (s *Spec, tk *Task) error {
+    if err := s.WriteFile("output.txt", []byte(s.Name), 0o660); err != nil {
+      return err
+    }
+    return s.EmitFileKey("/")
+  }
+
+  producer_a.EnqueueTaskFunc("produce", produce_func)
+  producer_b.EnqueueTaskFunc("produce", produce_func)
+
+  // Consumer
+  //
+  merge.EnqueueTaskFunc("consume", TaskConsumeLinkFiles)
+
+  // The root spec checks the asset output
+  //
+  var num_assets int = 0
+  root.EnqueueTaskFunc("assert-assets", func (s *Spec, tk *Task) error {
+    for asset_chunk := range s.Input {
+      assets, err := asset_chunk.Expand() // TODO: flatten, not expand
+      if err != nil { return err }
+
+      for i, asset := range assets {
+        num_assets++
+        tk.Println(i, asset.Url)
+
+        url := asset.Url.String()
+        var expected_content string
+        switch url {
+          default:
+            t.Errorf("Asset with unrecognized URL: %s", url)
+            continue
+          case "ib://merge/@emit/a/output.txt":
+            expected_content = "producer_a"
+          case "ib://merge/@emit/b/output.txt":
+            expected_content = "producer_b"
+        }
+
+        if bytes, err := asset.GetContentBytes(); err != nil {
+          t.Errorf("Error reading %s: %v", url, err)
+        } else if content := string(bytes); content != expected_content {
+          t.Errorf("Asset %s has content \"%s\", expected \"%s\"", url, content, expected_content)
+        }
+      }
+    }
+    return nil
+  })
+
+  // Run the pipeline and assert the output
+  //
+  if err := root.Run(); err != nil {
+    t.Fatal(err)
+  }
+
+  if expect, got := 2, num_assets; got != expect {
+    t.Errorf("Expected %d assets, got %d", expect, got)
   }
 }

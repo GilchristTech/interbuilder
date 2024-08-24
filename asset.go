@@ -216,19 +216,20 @@ func (s *Spec) EmitAsset (a *Asset) error {
   var url_prefix   string = ""
   var suffix_path  string = ""
 
-  if strings.HasPrefix(url_path, "/@emit") {
-    url_prefix  = url_path[:len("/@emit")]
-    suffix_path = url_path[len("/@emit"):]
-  } else if strings.HasPrefix(url_path, "@emit") {
-    url_prefix  = url_path[:len("@emit")]
-    suffix_path = url_path[len("@emit"):]
+  if strings.HasPrefix(url_path, "/@emit/") {
+    url_prefix  = url_path[:len("/@emit/")]
+    suffix_path = url_path[len("/@emit/"):]
+  } else if strings.HasPrefix(url_path, "@emit/") {
+    url_prefix  = url_path[:len("@emit/")]
+    suffix_path = url_path[len("@emit/"):]
   } else {
     // TODO: detect leading and trailing slashes
-    url_prefix = "@emit/"
+    url_prefix = "/@emit/"
     suffix_path = url_path
     modified = true
   }
 
+  suffix_path = strings.TrimLeft(suffix_path, "/")
   var suffix_path_original = suffix_path
 
   // Apply path transformations
@@ -258,8 +259,8 @@ func (s *Spec) EmitAsset (a *Asset) error {
 
 
 func (s *Spec) EmitFileKey (file_path string, key_parts ...string) error {
-  var key = append([]string {"@emit"}, key_parts...)
-  asset, err := s.MakeFileKeyAsset(file_path, key...)
+  key := path.Join(key_parts...)
+  asset, err := s.MakeFileKeyAsset(file_path, key)
   if err != nil { return fmt.Errorf("Error emitting file file with key %s: %w", key, err) }
   return s.EmitAsset(asset)
 }
@@ -327,7 +328,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
   // TODO: specify means of singular access
   var type_mask uint64 = ASSET_TYPE_UNDEFINED
 
-  var asset = Asset {
+  var new_asset = Asset {
     Url:          asset_url,
     History:      & history,
     Spec:         s,
@@ -339,10 +340,10 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
 
   if is_dir {
     // This asset is a directory. Populate it with pluralistic callback functions
-    asset.Mimetype = "inode/directory"
+    new_asset.Mimetype = "inode/directory"
 
     type_mask = ASSET_MULTI_FUNC | ASSET_MULTI_GENERATOR
-    asset.TypeMask = type_mask
+    new_asset.TypeMask = type_mask
 
     var keys = make([]string, 0)
     var walk_err error = nil
@@ -361,12 +362,12 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
       return nil, walk_err
     }
 
-    asset.asset_array_func = func (a *Asset) ([]*Asset, error) {
+    new_asset.asset_array_func = func (base_asset *Asset) ([]*Asset, error) {
       var assets = make([]*Asset, 0, len(keys))
 
       for _, key := range keys {
         var file_path string = filepath.Join(file_path, key)
-        asset, err := s.MakeFileKeyAsset(file_path, asset.Url.Path, key)
+        asset, err := s.MakeFileKeyAsset(file_path, base_asset.Url.Path, key)
 
         if err != nil { return nil, err }
         assets = append(assets, asset)
@@ -376,7 +377,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     }
     
     var generator_index int = 0
-    asset.generator_next = func () (*Asset, error) {
+    new_asset.generator_next = func () (*Asset, error) {
       if generator_index >= len(keys) {
         return nil, nil
       }
@@ -394,14 +395,14 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
   } else {
     // This asset is a file. Populate it with callbacks for IO handling
 
-    asset.TypeMask |= ASSET_SINGLE_READER | ASSET_SINGLE_WRITER
-    asset.Mimetype  = mime.TypeByExtension(filepath.Ext(file_path))
+    new_asset.TypeMask |= ASSET_SINGLE_READER | ASSET_SINGLE_WRITER
+    new_asset.Mimetype  = mime.TypeByExtension(filepath.Ext(file_path))
 
-    asset.get_reader_func = func (a *Asset) (io.Reader, error) {
+    new_asset.get_reader_func = func (a *Asset) (io.Reader, error) {
       return os.Open(a.FileSource)
     }
 
-    asset.get_writer_func = func (a *Asset) (io.Writer, error) {
+    new_asset.get_writer_func = func (a *Asset) (io.Writer, error) {
       if a.FileDest == "" {
         return nil, fmt.Errorf("FileDest in asset %s not defined", a.Url)
       }
@@ -415,7 +416,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
     }
   }
 
-  return &asset, nil
+  return &new_asset, nil
 }
 
 
