@@ -214,6 +214,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
     for _, asset := range assets {
       task.Println(asset.Url.String())
       if asset.FileSource == "" {
+        // TODO: check more specifically if the file can be resolved into a file, i.e: if it has content
         s.EmitAsset(asset)
         continue
       }
@@ -234,11 +235,39 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
       err = os.MkdirAll(directory, os.ModePerm)
       if err != nil { return err }
 
-      err = os.Link(asset.FileSource, dest)
-      if err != nil { return err }
+      // In the filesystem, either link the asset's source file,
+      // or if the asset is moified, copy the new content into
+      // this spec's source_dir
+      //
+      if asset.ContentModified == false {
+        err = os.Link(asset.FileSource, dest)
+        if err != nil { return err }
+
+        new_asset := s.AnnexAsset(asset)
+        new_asset.FileSource = dest
+        if err := s.EmitAsset(new_asset); err != nil {
+          return err
+        }
+      } else {
+        content, err := asset.GetContentBytes()
+        if err != nil { return err }
+
+        new_asset   := s.AnnexAsset(asset)
+        writer, err := new_asset.GetWriter()
+        if err != nil { return err }
+
+        if _, err := writer.Write(content); err != nil {
+          return err
+        }
+
+        new_asset.ContentModified = false
+        new_asset.FileSource = new_asset.FileDest
+        if err := s.EmitAsset(new_asset); err != nil {
+          return err
+        }
+      }
     }
   }
 
-  s.EmitFileKey("/")
   return nil
 }

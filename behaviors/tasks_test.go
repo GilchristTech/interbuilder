@@ -542,3 +542,51 @@ func TestTaskConsumeLinkFilesWithPathTransformations (t *testing.T) {
     t.Errorf("Expected %d assets, got %d", expect, got)
   }
 }
+
+
+func TestTaskConsumeLinkFilesModifiedFile (t *testing.T) {
+  var err     error
+  var consume *Spec = NewSpec("consume", nil)
+  var produce *Spec = consume.AddSubspec(NewSpec("produce", nil))
+
+  var output_dir string = t.TempDir()
+  consume.Props["source_dir"] = output_dir
+  produce.Props["source_dir"] = t.TempDir()
+
+  var unmodified_content string = "unmodified"
+  var   modified_content string =   "MODIFIED"
+
+  produce.EnqueueTaskFunc("produce", func (s *Spec, tk *Task) error {
+    err = s.WriteFile("unmodified.txt", []byte(unmodified_content), 0o660)
+    if err != nil { return err }
+    // TODO
+    err = s.WriteFile("modified.txt", []byte(modified_content), 0o660)
+    if err != nil { return err }
+
+    if err = s.EmitFileKey("unmodified.txt"); err != nil { return err }
+    if err = s.EmitFileKey("modified.txt"); err != nil { return err }
+
+    return nil
+  })
+
+  consume.EnqueueTaskFunc("consume-link", TaskConsumeLinkFiles)
+
+  if err = consume.Run(); err != nil {
+    t.Fatal(err)
+  }
+
+  var unmodified_path string = filepath.Join(output_dir, "unmodified.txt")
+  var   modified_path string = filepath.Join(output_dir,   "modified.txt")
+
+  if bytes, err := os.ReadFile(unmodified_path); err != nil {
+    t.Error(err)
+  } else if content, expect := string(bytes), unmodified_content; content != expect {
+    t.Errorf("File %s has content \"%s\", expected \"%s\"", "unmodified.txt", content, expect)
+  }
+
+  if bytes, err := os.ReadFile(modified_path); err != nil {
+    t.Error(err)
+  } else if content, expect := string(bytes), modified_content; content != expect {
+    t.Errorf("File %s has content \"%s\", expected \"%s\"", "modified.txt", content, expect)
+  }
+}

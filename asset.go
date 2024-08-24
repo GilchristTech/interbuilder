@@ -259,7 +259,16 @@ func (s *Spec) EmitAsset (a *Asset) error {
 
 
 func (s *Spec) EmitFileKey (file_path string, key_parts ...string) error {
-  key := path.Join(key_parts...)
+  var key string
+
+  if len(key_parts) == 0 {
+    // TODO: assert source_path is a relative path
+    // TODO: assert that the path separator is a forward-slash
+    key = file_path
+  } else {
+    key = path.Join(key_parts...)
+  }
+
   asset, err := s.MakeFileKeyAsset(file_path, key)
   if err != nil { return fmt.Errorf("Error emitting file file with key %s: %w", key, err) }
   return s.EmitAsset(asset)
@@ -297,6 +306,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
   var key string
 
   if len(key_parts) == 0 {
+    // TODO: assert source_path is a relative path
     // TODO: assert that the path separator is a forward-slash
     key = source_path
   } else {
