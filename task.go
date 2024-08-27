@@ -35,7 +35,7 @@ type Task struct {
   Started    bool
   Func       TaskFunc
   Next       *Task
-  History    HistoryEntry;
+  History    HistoryEntry
 }
 
 

@@ -279,3 +279,65 @@ func TestSprintSpec (t *testing.T) {
     specs_scan = specs_scan[index + len(expected) :]
   }
 }
+
+
+func TestSpecInternalTaskBuffer (t *testing.T) {
+  var root    *Spec = NewSpec("root", nil)
+  var subspec *Spec = root.AddSubspec(NewSpec("subspec", nil))
+
+  subspec.EnqueueTaskFunc("produce", func (s *Spec, tk *Task) error {
+    for i := range 3 {
+      asset := s.AddAsset( s.MakeAsset( fmt.Sprintf("%d", i) ) )
+      asset.SetContentBytes(
+        []byte( fmt.Sprintf("content %d", i) ),
+      )
+      tk.Println(asset.Url)
+    }
+    return nil
+  })
+
+  subspec.EnqueueTaskFunc("mutate", func (s *Spec, tk *Task) error {
+    for _, asset := range s.Assets {
+      // Read and modify the content of the asset
+      content, err := asset.GetContentBytes()
+      if err != nil { return nil }
+      asset.SetContentBytes( []byte("modified " + string(content)) )
+
+      tk.Println(asset.Url)
+    }
+    return nil
+  })
+
+  root.EnqueueTaskFunc("consume-assert", func (s *Spec, tk *Task) error {
+    for asset_chunk := range s.Input {
+      assets, err := asset_chunk.Expand() // TODO: Flatten()
+      if err != nil { return err }
+
+      for _, asset := range assets {
+        content, err := asset.GetContentBytes()
+        if err != nil {
+          t.Errorf("Error reading asset %s: %v", asset.Url, err)
+        } else {
+          var content string = string(content)
+          var expect  string = fmt.Sprintf(
+            "modified content %s",
+            strings.TrimLeft(asset.Url.Path, "/"),
+          )
+
+          if content != expect {
+            t.Errorf(
+              "Asset %s content is \"%s\", expected \"%s\"",
+              asset.Url, content, expect,
+            )
+          }
+        }
+      }
+    }
+
+    return nil
+  })
+
+  if err := root.Run(); err != nil {
+    t.Fatal(err)
+  }
+}

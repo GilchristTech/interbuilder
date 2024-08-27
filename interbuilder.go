@@ -36,6 +36,7 @@ type Spec struct {
 
   Input           chan *Asset
   InputGroup      sync.WaitGroup
+  Assets          []*Asset
 
   PathTransformations []*PathTransformation
 
@@ -189,7 +190,6 @@ func (s *Spec) Run () error {
   defer s.Printf("[%s] Exit\n", s.Name)
   defer s.Done()
 
-  //
   // Run subspecs in parallel goroutines
   //
   for _, subspec := range s.Subspecs {
@@ -231,7 +231,12 @@ func (s *Spec) Run () error {
 
     // Run the task
     //
-    s.Printf("[%s] task: %s (%s)\n", s.Name, task.Name, task.ResolverId)
+    if task.ResolverId == "" {
+      s.Printf("[%s] task: %s\n", s.Name, task.Name)
+    } else {
+      s.Printf("[%s] task: %s (%s)\n", s.Name, task.Name, task.ResolverId)
+    }
+
     if err := task.Run(s); err != nil {
       if task.ResolverId != "" {
         return fmt.Errorf(
@@ -246,7 +251,9 @@ func (s *Spec) Run () error {
       }
     }
 
-    // Flush the push queue and advance to the next task
+    // Flush the push queue and advance to the next task. Merge
+    // the internal asset buffer into the next task.
+    //
     // TODO: if a quit signal is sent, skip to the deferred portion of the task queue.
     //
     s.task_queue_lock.Lock()
@@ -262,6 +269,29 @@ func (s *Spec) Run () error {
     err := s.EmitAsset(asset)
     if err != nil { return err }
   }
+
+  var internal_asset_chunk *Asset
+
+  switch len(s.Assets) {
+    case 0:
+      // pass
+
+    default:
+      asset_chunk := s.MakeAsset("")
+      asset_chunk.SetAssetArray(s.Assets)
+      internal_asset_chunk = asset_chunk
+
+    case 1: 
+      internal_asset_chunk = s.Assets[0]
+  }
+
+  if internal_asset_chunk != nil {
+    if err := s.EmitAsset(internal_asset_chunk); err != nil {
+      return err
+    }
+  }
+
+  s.Assets = nil
 
   // For the above range to finish, s.Input must be closed. This
   // function runs a goroutine which waits for the subspecs to

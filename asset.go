@@ -136,6 +136,17 @@ func (a *Asset) GenerateAssetsArray () ([]*Asset, error) {
 }
 
 
+func (a *Asset) SetAssetArray (assets []*Asset) error {
+  if a.TypeMask & ASSET_FIELDS_ACCESS != 0 {
+    return fmt.Errorf("Cannot set asset array, type mask has existing access bits set, type mask: %O", a.TypeMask)
+  }
+
+  a.TypeMask |= ASSET_MULTI_ARRAY
+  a.asset_array = assets
+  return nil
+}
+
+
 /*
   For a given filesystem path, relative to the source_dir
   property, return whether that path exists; as well as any error
@@ -206,6 +217,16 @@ func (s *Spec) WriteFile (key string, data []byte, perm fs.FileMode) error {
 }
 
 
+/*
+  AddAsset adds an asset to the Spec's internal asset buffer.
+  Returns the asset.
+*/
+func (s *Spec) AddAsset (a *Asset) (*Asset) {
+  s.Assets = append(s.Assets, a)
+  return a
+}
+
+
 func (s *Spec) EmitAsset (a *Asset) error {
   if a.Url == nil {
     return fmt.Errorf("Cannot emit asset with a nil URL")
@@ -250,11 +271,16 @@ func (s *Spec) EmitAsset (a *Asset) error {
     a           = & copied
   }
 
+  s.OutputAsset(a)
+
+  return nil
+}
+
+
+func (s *Spec) OutputAsset (a *Asset) {
   for _, output := range s.OutputChannels {
     (*output) <- a
   }
-
-  return nil
 }
 
 
