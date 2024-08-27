@@ -208,7 +208,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
   }
 
   for input := range s.Input {
-    assets, err := input.Expand() // TODO: flatten, not expand
+    assets, err := input.Flatten()
     if err != nil { return err }
 
     for _, asset := range assets {

@@ -103,7 +103,7 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
   root.EnqueueTaskFunc("consume-dist", func (s *Spec, tk *Task) error {
     for asset_chunk := range s.Input {
       tk.Println("Asset chunk:", asset_chunk.Url)
-      assets, err := asset_chunk.Expand() // TODO: assets.Flatten
+      assets, err := asset_chunk.Flatten()
       if err != nil { return err }
 
       for _, asset := range assets {
@@ -275,7 +275,7 @@ func TestTaskTransformHtml (t *testing.T) {
     var num_assets int = 0
 
     for asset_chunk := range s.Input {
-      assets, err :=  asset_chunk.Expand()
+      assets, err :=  asset_chunk.Flatten()
       if err != nil { return err }
 
       for _, a := range assets {
@@ -503,7 +503,7 @@ func TestTaskConsumeLinkFilesWithPathTransformations (t *testing.T) {
   var num_assets int = 0
   root.EnqueueTaskFunc("assert-assets", func (s *Spec, tk *Task) error {
     for asset_chunk := range s.Input {
-      assets, err := asset_chunk.Expand() // TODO: flatten, not expand
+      assets, err := asset_chunk.Flatten()
       if err != nil { return err }
 
       for i, asset := range assets {

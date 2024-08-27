@@ -301,8 +301,8 @@ func (s *Spec) EmitFileKey (file_path string, key_parts ...string) error {
 }
 
 
-func (s *Spec) MakeAsset (key string) *Asset {
-  var asset_url *url.URL = s.MakeUrl(key)
+func (s *Spec) MakeAsset (key ...string) *Asset {
+  var asset_url *url.URL = s.MakeUrl(key...)
 
   var history = HistoryEntry {
     Url:     asset_url,
@@ -522,6 +522,29 @@ func (a *Asset) Expand () ([]*Asset, error) {
   }
 
   return nil, fmt.Errorf("Unsupported asset type mask 0x%X", a.TypeMask)
+}
+
+
+func (a *Asset) Flatten () ([]*Asset, error) {
+  var err error
+
+  root_assets, err := a.Expand()
+  if err != nil { return nil, err }
+
+  flattened_assets := make([]*Asset, 0, len(root_assets))
+
+  for _, root_asset := range root_assets {
+    if root_asset.IsSingle() {
+      flattened_assets = append(flattened_assets, root_asset)
+      continue
+    }
+
+    assets, err := root_asset.Flatten()
+    if err != nil { return nil, err }
+    flattened_assets = append(flattened_assets, assets...)
+  }
+
+  return flattened_assets, nil
 }
 
 

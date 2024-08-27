@@ -4,6 +4,7 @@ import (
   "testing"
   "net/url"
   "strconv"
+  "path"
   "path/filepath"
   "os"
   "fmt"
@@ -202,6 +203,68 @@ func TestAssetExpandGenerator (t *testing.T) {
       t.Fatalf("Expanded assets array in test asset expected to have a length of 3, got %d", len(assets))
     }
   })
+}
+
+
+func TestAssetFlattenNestedMultiAssets (t *testing.T) {
+  var spec *Spec = NewSpec("spec", nil)
+
+  var asset_single_counter int
+  var asset_multi_counter  int
+
+  var makeNestedAssets   func (base_key string, level int) *Asset
+  makeNestedAssets     = func (base_key string, level int) *Asset {
+    if level <= 0 {
+      asset := spec.MakeAsset(
+        base_key, fmt.Sprintf("single_%d.%d", level, asset_single_counter),
+      )
+      asset_single_counter++
+      return asset
+    }
+
+    base_key = path.Join(
+        base_key, fmt.Sprintf("%d.%d", level, asset_multi_counter),
+      )
+    asset := spec.MakeAsset(base_key)
+    asset_multi_counter++
+
+    asset.SetAssetArray([]*Asset {
+      makeNestedAssets(base_key, 0),
+      makeNestedAssets(base_key, level-1),
+      makeNestedAssets(base_key, level-1),
+    })
+
+    return asset
+  }
+
+  var root_asset = makeNestedAssets("", 5)
+
+  flattened, err := root_asset.Flatten()
+
+  if err != nil {
+    t.Fatalf("Error flattening assets: %v", err)
+  }
+
+  var all_assets_singular bool = true
+
+  for _, asset := range flattened {
+    if ! asset.IsSingle() {
+      t.Errorf("Asset is not singular: %s", asset.Url)
+      all_assets_singular = false
+    }
+    if asset.IsMulti() {
+      t.Errorf("Asset is pluralistic: %s", asset.Url)
+      all_assets_singular = false
+    }
+  }
+
+  if all_assets_singular == false {
+    t.Error("Not all assets are singular")
+  }
+
+  if got, expect := len(flattened), 63; got != expect {
+    t.Errorf("Flattening assets returned %d assets, got %d", expect, got)
+  }
 }
 
 

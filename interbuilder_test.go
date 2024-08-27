@@ -310,7 +310,7 @@ func TestSpecInternalTaskBuffer (t *testing.T) {
 
   root.EnqueueTaskFunc("consume-assert", func (s *Spec, tk *Task) error {
     for asset_chunk := range s.Input {
-      assets, err := asset_chunk.Expand() // TODO: Flatten()
+      assets, err := asset_chunk.Flatten()
       if err != nil { return err }
 
       for _, asset := range assets {
