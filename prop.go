@@ -27,7 +27,7 @@ func (s *Spec) GetPropType (key string, prop_type reflect.Type) (value any, foun
   if value, found := s.Props[key]; found {
     return value, true, reflect.TypeOf(value) == prop_type
   }
-  return nil, false, false
+  return reflect.Zero(prop_type).Interface(), false, false
 }
 
 
@@ -46,14 +46,18 @@ func (s *Spec) RequireProp (key string) (value any, err error) {
 func (s *Spec) RequirePropType (key string, prop_type reflect.Type) (value any, err error) {
   value_any, err := s.RequireProp(key)
 
-  if reflect.TypeOf(value_any) == prop_type {
-    return value_any, nil
+  if value_any == nil {
+    value_any = reflect.Zero(prop_type).Interface()
   }
 
-  return nil, fmt.Errorf(
-    "Prop \"%s\" in Spec %s is expected to be a %v, got %T",
-    key, s.Name, prop_type, value,
-  )
+  if reflect.TypeOf(value_any) != prop_type {
+    return value_any, fmt.Errorf(
+      "Prop \"%s\" in Spec %s is expected to be a %v, got %T",
+      key, s.Name, prop_type, value_any,
+    )
+  }
+
+  return value_any, err
 }
 
 
@@ -76,7 +80,7 @@ func (s *Spec) InheritPropType (key string, prop_type reflect.Type) (value any, 
   }
 
   if s.Parent == nil {
-    return nil, false, false
+    return reflect.Zero(prop_type).Interface(), false, false
   }
 
   return s.Parent.InheritPropType(key, prop_type)
@@ -101,16 +105,20 @@ func (s *Spec) RequireInheritPropType (key string, prop_type reflect.Type) (valu
       return value, nil
     }
 
-    return nil, fmt.Errorf(
+    return reflect.Zero(prop_type).Interface(), fmt.Errorf(
       "Inherited prop \"%s\" in Spec %s is expected to be a %v, got %T",
       key, s.Name, prop_type, value,
     )
   }
 
-  return nil, fmt.Errorf(
-    "Inherited prop \"%s\" in Spec %s of type %v not found",
-    key, s.Name, prop_type,
-  )
+  if s.Parent == nil {
+    return reflect.Zero(prop_type).Interface(), fmt.Errorf(
+      "Inherited prop \"%s\" in Spec %s of type %v not found",
+      key, s.Name, prop_type,
+    )
+  }
+
+  return s.Parent.RequireInheritPropType(key, prop_type)
 }
 
 /*
@@ -128,15 +136,16 @@ func (s *Spec) InheritPropString (k string) (value string, ok, found bool) {
   return value, ok, found
 }
 func (s *Spec) RequireInheritPropString (k string) (value string, err error) {
-  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(""))
+  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(value))
   if err != nil { return }
   return value_any.(string), nil
 }
 func (s *Spec) RequirePropString (k string) (value string, err error) {
-  value_any, err := s.RequirePropType(k, reflect.TypeOf(""))
+  value_any, err := s.RequirePropType(k, reflect.TypeOf(value))
   if err == nil { return value_any.(string), nil }
   return "", err
 }
+
 
 /*
   Boolean prop access methods
@@ -153,16 +162,41 @@ func (s *Spec) InheritPropBool (k string) (value bool, ok, found bool) {
   return value, ok, found
 }
 func (s *Spec) RequireInheritPropBool (k string) (value bool, err error) {
-  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(""))
+  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(value))
   if err != nil { return }
   return value_any.(bool), nil
 }
 func (s *Spec) RequirePropBool (k string) (value bool, err error) {
-  value_any, err := s.RequirePropType(k, reflect.TypeOf(""))
+  value_any, err := s.RequirePropType(k, reflect.TypeOf(value))
   if err == nil { return value_any.(bool), nil }
   return false, err
 }
 
+
+/*
+  Boolean prop access methods
+*/
+
+func (s *Spec) GetPropInt (k string) (value int, ok, found bool) {
+  value_any, found := s.Props[k]
+  value, ok = value_any.(int)
+  return value, ok, found
+}
+func (s *Spec) InheritPropInt (k string) (value int, ok, found bool) {
+  value_any, found := s.InheritProp(k)
+  value, ok = value_any.(int)
+  return value, ok, found
+}
+func (s *Spec) RequireInheritPropInt (k string) (value int, err error) {
+  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(value))
+  if err != nil { return }
+  return value_any.(int), nil
+}
+func (s *Spec) RequirePropInt (k string) (value int, err error) {
+  value_any, err := s.RequirePropType(k, reflect.TypeOf(value))
+  if err == nil { return value_any.(int), nil }
+  return 0, err
+}
 
 /*
   URL prop access methods
@@ -179,12 +213,12 @@ func (s *Spec) InheritPropUrl (k string) (value *url.URL, ok, found bool) {
   return value, ok, found
 }
 func (s *Spec) RequireInheritPropUrl (k string) (value *url.URL, err error) {
-  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(""))
+  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(value))
   if err != nil { return }
   return value_any.(*url.URL), nil
 }
 func (s *Spec) RequirePropUrl (k string) (value *url.URL, err error) {
-  value_any, err := s.RequirePropType(k, reflect.TypeOf(& url.URL {}))
+  value_any, err := s.RequirePropType(k, reflect.TypeOf(value))
   if err == nil { return value_any.(*url.URL), nil }
   return nil, err
 }
@@ -204,12 +238,12 @@ func (s *Spec) InheritPropJson (k string) (value map[string]any, ok, found bool)
   return value, ok, found
 }
 func (s *Spec) RequireInheritPropJson (k string) (value map[string]any, err error) {
-  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(""))
+  value_any, err := s.RequireInheritPropType(k, reflect.TypeOf(value))
   if err != nil { return }
   return value_any.(map[string]any), nil
 }
 func (s *Spec) RequirePropJson (k string) (value map[string]any, err error) {
-  value_any, err := s.RequirePropType(k, reflect.TypeOf(& url.URL {}))
+  value_any, err := s.RequirePropType(k, reflect.TypeOf(value))
   if err == nil { return value_any.(map[string]any), nil }
   return nil, err
 }
