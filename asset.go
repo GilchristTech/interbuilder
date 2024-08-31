@@ -9,6 +9,7 @@ import (
   "path"
   "path/filepath"
   "strings"
+  "bytes"
   "io/fs"
   "mime"
 )
@@ -18,24 +19,26 @@ import (
 //
 const (
   /* Asset type mask bit ranges */
-  ASSET_FIELDS          uint64 = 0b_1_11111
-  ASSET_FIELDS_QUANTITY uint64 = 0b_1_00000
-  ASSET_FIELDS_ACCESS   uint64 = 0b_0_11111
+  ASSET_FIELDS          uint64 = 0b_111_111
+  ASSET_FIELDS_QUANTITY uint64 = 0b_100_000
+  ASSET_FIELDS_ACCESS   uint64 = 0b_011_111
 
-  ASSET_TYPE_UNDEFINED  uint64 = 0b_0_00000
+  ASSET_TYPE_UNDEFINED  uint64 = 0b_000_000
 
   /* Asset quantity bit: (whether asset is singular or pluralistic) */
-  ASSET_QUANTITY_SINGLE uint64 = 0b_0_00000
-  ASSET_QUANTITY_MULTI  uint64 = 0b_1_00000
+  ASSET_QUANTITY_SINGLE uint64 = 0b_000_000
+  ASSET_QUANTITY_MULTI  uint64 = 0b_100_000
 
-  /* Singular asset types */
-  ASSET_SINGLE_READER   uint64 = 0b_0_00001
-  ASSET_SINGLE_WRITER   uint64 = 0b_0_00010
+  /* Singular asset types: how its data is read/written */
+  ASSET_SINGLE_BYTE_R   uint64 = 0b_000_001 // Byte reader
+  ASSET_SINGLE_BYTE_W   uint64 = 0b_000_010 // Byte writer
+  ASSET_SINGLE_DATA_R   uint64 = 0b_000_100 // Data reader
+  ASSET_SINGLE_DATA_W   uint64 = 0b_000_100 // Data writer
 
-  /* Mult-asset types */
-  ASSET_MULTI_ARRAY     uint64 = 0b_1_00001
-  ASSET_MULTI_FUNC      uint64 = 0b_1_00010
-  ASSET_MULTI_GENERATOR uint64 = 0b_1_00100
+  /* Mult-asset types: how it is expanded into other assets */
+  ASSET_MULTI_ARRAY     uint64 = 0b_100_001
+  ASSET_MULTI_FUNC      uint64 = 0b_100_010
+  ASSET_MULTI_GENERATOR uint64 = 0b_100_100
 )
 
 
@@ -46,10 +49,33 @@ type Asset struct {
 
   Mimetype  string
 
-  // Content
   //
-  ContentModified bool
-  ContentBytes    []byte
+  // Content:
+  // Assets track content in two ways: a byte buffer
+  // (Asset.ContentBytes) and a general-purpose field
+  // (Asset.ContentData). From these functions, higher-level
+  // methods either return cached content or find a way to read
+  // the data.
+  //
+  ContentBytes             []byte
+  ContentModified          bool
+
+  ContentData              any
+  ContentDataModified      bool
+  ContentDataSet           bool
+
+  content_data_read_func   func (*Asset, io.Reader) (any, error)
+  content_data_write_func  func (*Asset, io.Writer, any) (int, error)
+
+  // Because Assets track two separate forms of the same data
+  // (byte content and untyped data content),
+  // and because those can diverge after mutation, tracking
+  // whether these two areas in memory represent the same state
+  // of content is done with the byte_data_parity flag.
+  // When content is read from bytes into data (or vice versa),
+  // the content between them has parity.
+  //
+  has_byte_data_parity bool
 
   // IO handling
   //
@@ -61,8 +87,8 @@ type Asset struct {
   //
   TypeMask         uint64
 
-  get_reader_func  func (*Asset) (io.Reader, error)
-  get_writer_func  func (*Asset) (io.Writer, error)
+  content_bytes_get_reader_func func (*Asset) (io.Reader, error)
+  content_bytes_get_writer_func func (*Asset) (io.Writer, error)
 
   asset_array      []*Asset
   asset_array_func func (*Asset) ([]*Asset, error)
@@ -431,14 +457,14 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
   } else {
     // This asset is a file. Populate it with callbacks for IO handling
 
-    new_asset.TypeMask |= ASSET_SINGLE_READER | ASSET_SINGLE_WRITER
     new_asset.Mimetype  = mime.TypeByExtension(filepath.Ext(file_path))
 
-    new_asset.get_reader_func = func (a *Asset) (io.Reader, error) {
+    err := new_asset.SetContentBytesGetReaderFunc(func (a *Asset) (io.Reader, error) {
       return os.Open(a.FileSource)
-    }
+    })
+    if err != nil { return nil, err }
 
-    new_asset.get_writer_func = func (a *Asset) (io.Writer, error) {
+    new_asset.SetContentBytesWriterFunc(func (a *Asset) (io.Writer, error) {
       if a.FileDest == "" {
         return nil, fmt.Errorf("FileDest in asset %s not defined", a.Url)
       }
@@ -449,7 +475,8 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
       if err != nil { return nil, err }
 
       return os.Create(a.FileDest)
-    }
+    })
+    if err != nil { return nil, err }
   }
 
   return &new_asset, nil
@@ -548,37 +575,58 @@ func (a *Asset) Flatten () ([]*Asset, error) {
 }
 
 
-func (a *Asset) GetReader () (io.Reader, error) {
+func (a *Asset) SetContentBytesGetReaderFunc (f func (*Asset) (io.Reader, error)) error {
+  if ! a.IsSingle() {
+    return fmt.Errorf("Cannot set get-reader function, asset is not singular")
+  }
+  a.TypeMask |= ASSET_SINGLE_BYTE_R
+  a.content_bytes_get_reader_func = f
+  return nil
+}
+
+
+func (a *Asset) SetContentBytesWriterFunc (f func (*Asset) (io.Writer, error)) error {
+  if ! a.IsSingle() {
+    return fmt.Errorf("Cannot set get-writer function, asset is not singular")
+  }
+
+  a.TypeMask |= ASSET_SINGLE_BYTE_W
+  a.content_bytes_get_writer_func = f
+  return nil
+}
+
+
+func (a *Asset) ContentBytesGetReader () (io.Reader, error) {
   if ! a.IsSingle() {
     return nil, fmt.Errorf("Cannot get reader, asset is not singular")
   }
 
-  if a.TypeMask & ASSET_SINGLE_READER == 0 {
+  if a.TypeMask & ASSET_SINGLE_BYTE_R == 0 {
     return nil, fmt.Errorf("Cannot get reader, asset does not have a reader type")
   }
 
-  if a.get_reader_func == nil {
+  if a.content_bytes_get_reader_func == nil {
     return nil, fmt.Errorf("Cannot get reader, asset does not have a reader-getter function defined")
   }
 
-  return a.get_reader_func(a)
+  return a.content_bytes_get_reader_func(a)
 }
 
 
-func (a *Asset) GetWriter () (io.Writer, error) {
+func (a *Asset) ContentBytesGetWriter () (io.Writer, error) {
   if ! a.IsSingle() {
     return nil, fmt.Errorf("Cannot get writer, asset is not singular")
   }
 
-  if a.TypeMask & ASSET_SINGLE_READER == 0 {
+  if a.TypeMask & ASSET_SINGLE_BYTE_R == 0 {
     return nil, fmt.Errorf("Cannot get writer, asset does not have a writer type")
   }
 
-  if a.get_writer_func == nil {
+  if a.content_bytes_get_writer_func == nil {
     return nil, fmt.Errorf("Cannot get writer, asset does not have a writer-getter function defined")
   }
 
-  return a.get_writer_func(a)
+  return a.content_bytes_get_writer_func(a)
 }
 
 
@@ -588,21 +636,42 @@ func (a *Asset) GetContentBytes () ([]byte, error) {
   }
 
   if a.ContentBytes != nil {
+    if a.ContentDataModified {
+      if a.has_byte_data_parity {
+        return a.ContentBytes, nil
+      }
+
+      // Read ContentData into ContentBytes, and set the parity
+      // flag.
+
+      writer := bytes.NewBuffer([]byte{})
+      if _, err := a.WriteContentDataTo(writer); err != nil {
+        return nil, err
+      }
+      a.ContentBytes = writer.Bytes()
+
+      a.has_byte_data_parity = true
+      return a.ContentBytes, nil
+    }
+
+    // The content data is not modified. Therefore, the
+    // content bytes can be returned as-is.
+    //
     return a.ContentBytes, nil
   }
 
-  if a.get_reader_func != nil {
-    reader, err := a.GetReader()
-    if err != nil { return nil, err }
-
-    bytes, err := io.ReadAll(reader)
-    if err != nil { return nil, err }
-
-    a.ContentBytes = bytes
-    return bytes, nil
+  if a.content_bytes_get_reader_func == nil {
+    return nil, nil
   }
 
-  return nil, nil
+  reader, err := a.ContentBytesGetReader()
+  if err != nil { return nil, err }
+
+  bytes, err := io.ReadAll(reader)
+  if err != nil { return nil, err }
+
+  a.ContentBytes = bytes
+  return bytes, nil
 }
 
 
@@ -614,4 +683,149 @@ func (a *Asset) SetContentBytes (content []byte) error {
   a.ContentBytes = content
   a.ContentModified = true
   return nil
+}
+
+
+func (a *Asset) GetContentData () (any, error) {
+  if ! a.IsSingle() {
+    return nil, fmt.Errorf("Cannot get data, asset is not singular")
+  }
+
+  if a.ContentData != nil {
+    return a.ContentData, nil
+  }
+
+  if a.TypeMask & ASSET_SINGLE_DATA_R != ASSET_SINGLE_DATA_R {
+    return nil, fmt.Errorf(
+      "Cannot get data, asset has no data loader type bit set",
+    )
+  }
+
+  if a.content_data_read_func == nil {
+    return nil, fmt.Errorf(
+      "Cannot get data, asset has no data loader set.",
+    )
+  }
+
+  if a.ContentBytes != nil {
+    reader    := bytes.NewReader(a.ContentBytes)
+    data, err := a.content_data_read_func(a, reader)
+    if err != nil {
+      return nil, fmt.Errorf(
+        "Error while reading data from content buffer: %w", err,
+      )
+    }
+    a.ContentData = data
+    return data, nil
+  } else {
+    reader, err := a.ContentBytesGetReader()
+    if err != nil {
+      return nil, fmt.Errorf(
+        "Cannot get data, error getting reader: %w", err,
+      )
+    }
+
+    data, err := a.content_data_read_func(a, reader)
+    if err != nil {
+      return nil, fmt.Errorf(
+        "Error while reading data from content reader: %w", err,
+      )
+    }
+    a.ContentData = data
+    return data, nil
+  }
+}
+
+
+func (a *Asset) SetContentData (data any) error {
+  if ! a.IsSingle() {
+    return fmt.Errorf("Asset is not singular")
+  }
+
+  a.ContentData     = data
+  a.ContentModified = true
+  return nil
+}
+
+
+func (a *Asset) SetContentDataReadFunc (f func (a *Asset, r io.Reader) (any, error)) error {
+  if ! a.IsSingle() {
+    return fmt.Errorf("Asset is not singular")
+  }
+
+  a.TypeMask |= ASSET_SINGLE_DATA_R
+  a.content_data_read_func = f
+  
+  // Because setting the function that reads new ContentBytes can
+  // result in different ContentBytes which would have occured
+  // following a pas read of content data, not clearing the cache
+  // could result in a drift from mutations in the two instances
+  // of representative data. Reads of further data should reread,
+  // which would be caused by clearning the data cache.
+  //
+  a.ClearContentDataCache()
+
+  return nil
+}
+
+
+func (a *Asset) SetContentDataWriteFunc (f func (*Asset, io.Writer, any) (int, error)) error {
+  if ! a.IsSingle() {
+    return fmt.Errorf("Asset is not singular")
+  }
+
+  a.TypeMask |= ASSET_SINGLE_DATA_W
+  a.content_data_write_func = f
+  return nil
+}
+
+
+func (a *Asset) GetContentDataWriteFunc () (func (*Asset, io.Writer, any)(int, error), error) {
+  if ! a.IsSingle() {
+    return nil, fmt.Errorf("Asset is not singular")
+  }
+
+  if a.content_data_write_func == nil {
+    return nil, fmt.Errorf("Cannot get data write function, content data function not set")
+  }
+
+  return a.content_data_write_func, nil
+}
+
+
+/*
+  ReadDataTo reads data from the parameter using the Asset's data
+  reader. This does read or write from any internal data cache
+  (but it's possible the reader function does).
+*/
+func (a *Asset) WriteContentDataTo (to io.Writer) (int, error) {
+  if ! a.IsSingle() {
+    return 0, fmt.Errorf("Cannot write, asset is not singular")
+  }
+
+  writeData, err := a.GetContentDataWriteFunc()
+  if err != nil {
+    return 0, fmt.Errorf("Cannot get data writer function: %w", err)
+  }
+  return writeData(a, to, a.ContentData)
+}
+
+
+func (a *Asset) ClearContentCache () {
+  a.ClearContentByteCache()
+  a.ClearContentDataCache()
+}
+
+
+func (a *Asset) ClearContentByteCache () {
+  a.ContentBytes         = nil
+  a.ContentModified      = false
+  a.has_byte_data_parity = false
+}
+
+
+func (a *Asset) ClearContentDataCache () {
+  a.ContentData          = nil
+  a.ContentDataModified  = false
+  a.has_byte_data_parity = false
 }

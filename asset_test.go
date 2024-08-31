@@ -10,6 +10,7 @@ import (
   "fmt"
   "io"
   "time"
+  "bytes"
 )
 
 
@@ -338,7 +339,7 @@ func TestSpecMakeFileKeyAssetValidFile (t *testing.T) {
 
   // Test reading the asset file and assert its content
   //
-  reader, err := asset.GetReader()
+  reader, err := asset.ContentBytesGetReader()
   if err != nil {
     t.Fatal(err)
   }
@@ -359,7 +360,7 @@ func TestSpecMakeFileKeyAssetValidFile (t *testing.T) {
 
   // Test writing the asset file
   //
-  writer, err := asset.GetWriter() 
+  writer, err := asset.ContentBytesGetWriter() 
   if err != nil {
     t.Fatal(err)
   }
@@ -519,5 +520,131 @@ func TestFileAssetGetContentBytes (t *testing.T) {
 
   if got, expected := string(content), "This is a text file!"; got != expected {
     t.Fatalf("File content expected to be %s, got %s", expected, got)
+  }
+}
+
+
+func TestAssetContentData (t *testing.T) {
+  var buffer = []byte("Unmodified content")
+
+  var asset = & Asset {}
+
+  // This asset has no content data access functions. Assert that
+  // attempts to get the data, prior to it being set, result in
+  // errors.
+  //
+  if data, err := asset.GetContentData(); err == nil {
+    t.Error("Asset.GetContentData() did not error")
+  } else if data != nil {
+    t.Error("Asset.GetContentData() errored, but also returned data")
+  }
+
+  if dataWriteFunc, err := asset.GetContentDataWriteFunc(); err == nil {
+    t.Error("Asset.GetContentDataWriteFunc() did not error")
+  } else if dataWriteFunc != nil {
+    t.Error("Asset.GetContentDataWriteFunc() errored, but also returned a function")
+  }
+
+  if dataWriteFunc, err := asset.GetContentDataWriteFunc(); err == nil {
+    t.Error("Asset.GetContentDataWriteFunc() did not error")
+  } else if dataWriteFunc != nil {
+    t.Error("Asset.GetContentDataWriteFunc() errored, but also returned a function")
+  }
+
+  // After confirming invalid access, define readers and writers
+  // (a means for valid access)
+  //
+  asset.SetContentBytesGetReaderFunc(func (*Asset) (io.Reader, error) {
+    return bytes.NewReader(buffer), nil
+  })
+
+  asset.SetContentDataReadFunc(func (a *Asset, r io.Reader) (any, error) {
+    content, err := io.ReadAll(r)
+    if err != nil { return "", err }
+    string_content := string(content)
+    return &string_content, nil
+  })
+
+  asset.SetContentDataWriteFunc(func (a *Asset, w io.Writer, data_any any) (int, error) {
+    data, ok := data_any.(*string)
+    if ok == false {
+      return 0, fmt.Errorf("Cannot write data, expected string, got %T", data_any)
+    }
+
+    if w == nil {
+      return 0, fmt.Errorf("Cannot write data, writer is nil")
+    }
+
+    return w.Write([]byte(*data))
+  })
+
+  // Get and update the asset's internal content data
+  //
+  data_any, err := asset.GetContentData()
+  if err != nil {
+    t.Fatal(err)
+  } else if data, ok := data_any.(*string); !ok {
+    t.Fatalf("Data is not a string, got %T", data_any)
+  } else if expect, got := "Unmodified content", *data; expect != got {
+    t.Fatalf("Content data is %s, got %s", got, expect)
+  }
+
+  // Assert that the content data is equal upon setting it and
+  // getting it again (verifying that the cache is being used)
+  //
+  var new_content_value  string = "MODIFIED CONTENT"
+  var new_content       *string = &new_content_value
+  if err := asset.SetContentData(new_content); err != nil {
+    t.Fatal(err)
+  }
+
+  if data_again_any, err := asset.GetContentData(); err != nil {
+    t.Error(err)
+  } else if data_again, ok := data_again_any.(*string); !ok {
+    t.Errorf("Got data again, but got a %T, expected *string", data_again_any)
+  } else if data_again != new_content {
+    t.Errorf("Upon getting content data again, the new data is not an equal pointer value, indicating that cached data is not being used.")
+  }
+
+  // Update content bytes and assert their value
+  //
+  writer := bytes.Buffer {}
+  if _, err := asset.WriteContentDataTo(&writer); err != nil {
+    t.Fatal(err)
+  }
+
+  if err := asset.SetContentBytes(writer.Bytes()); err != nil {
+    t.Fatal(err)
+  }
+
+  if bytes_data, err := asset.GetContentBytes(); err != nil {
+    t.Fatal(err)
+  } else if got, expect := string(bytes_data), "MODIFIED CONTENT"; got != expect {
+    t.Fatalf("Expected asset content bytes to be \"%s\", got \"%s\"", expect, got)
+  }
+
+  // Assert clearing the content cache before further tests
+  //
+  asset.ClearContentDataCache()
+  if got := asset.ContentData; got != nil {
+    t.Fatalf("Asset content data cache cleared, but content data is not nil, got \"%s\"", got)
+  } else if asset.ContentDataModified != false {
+    t.Fatalf("Asset content data cache was cleared, but still is considered modified (asset.ContentDataModified is true)")
+  }
+
+  // Mutate the content bytes, and reload the content data. The
+  // content data should reflect this mutation instead of the
+  // initial data.
+  //
+  if err != asset.SetContentBytes([]byte("MODIFIED AGAIN")) {
+    t.Fatal(err)
+  }
+
+  if content_data_any, err := asset.GetContentData(); err != nil {
+    t.Fatal(err)
+  } else if content_data, ok := content_data_any.(*string); !ok {
+    t.Fatalf("Expected content data to be a *string, got %T", content_data_any)
+  } else if got, expect := *content_data, "MODIFIED AGAIN"; got != expect {
+    t.Fatalf("Expected asset content data to be \"%s\", got \"%s\"", expect, got)
   }
 }

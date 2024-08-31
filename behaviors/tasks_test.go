@@ -294,7 +294,7 @@ func TestTaskTransformHtml (t *testing.T) {
           // pass
 
         case "text/html":
-          reader, err := a.GetReader()
+          reader, err := a.ContentBytesGetReader()
           if err != nil { return err }
 
           doc, err := html.Parse(reader)
@@ -350,7 +350,7 @@ func TestTaskTransformHtml (t *testing.T) {
         content, err := asset.GetContentBytes()
         if err != nil { return err }
 
-        writer, err := asset.GetWriter()
+        writer, err := asset.ContentBytesGetWriter()
         _, err = writer.Write(content)
         if err != nil { return err }
 
@@ -365,7 +365,7 @@ func TestTaskTransformHtml (t *testing.T) {
 
         asset = s.AnnexAsset(asset)
 
-        writer, err := asset.GetWriter()
+        writer, err := asset.ContentBytesGetWriter()
         if err != nil {
           return fmt.Errorf("Error getting asset writer for asset %s: %w", asset.Url, err)
         }

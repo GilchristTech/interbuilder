@@ -253,7 +253,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
         if err != nil { return err }
 
         new_asset   := s.AnnexAsset(asset)
-        writer, err := new_asset.GetWriter()
+        writer, err := new_asset.ContentBytesGetWriter()
         if err != nil { return err }
 
         if _, err := writer.Write(content); err != nil {
