@@ -43,6 +43,6 @@ $(COVERAGE_FILE): $(DEPS_CHECK) $(MODULE_SRC)
 # TODO: remove. These build targets are temporary; The main build target is a CLI tool which requires arguments.
 # TODO: with these build targets being temporary, so is the specs.json which the current main function reads from
 run: $(CMD)
-	./$(CMD)
+	./$(CMD) specs.json
 run-watch:
 	$(WATCHER) 'make && make run || exit 1'
