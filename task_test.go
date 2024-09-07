@@ -16,6 +16,8 @@ func TestSpecGetTaskResolverById (t *testing.T) {
   var root    *Spec = NewSpec("root", nil)
   var subspec *Spec = root.AddSubspec(NewSpec("subspec", nil))
 
+  root.Props["quiet"] = true
+
   var resolver_4b = & TaskResolver { Id: "task_name_4" }
   var resolver_4a = & TaskResolver { Id: "task_name_4" }
   var resolver_3  = & TaskResolver { Id: "task_name_3" }
@@ -173,6 +175,7 @@ func TestSpecTaskQueue (t *testing.T) {
   // TODO: add a task which modifies the task queue, instead of the order of tasks being mostly evaluated prior to task execution.
 
   var root *Spec = NewSpec("root", nil)
+  root.Props["quiet"] = true
 
   // Give all tasks the same function, which appends it's name
   // onto a list of tasks. The tasks will be inserted, and if
@@ -220,6 +223,7 @@ func TestTaskCommand (t *testing.T) {
   var root       *Spec  = NewSpec("root", nil)
   var source_dir string = t.TempDir()
   root.Props["source_dir"] = source_dir
+  root.Props["quiet"] = true
 
   root.EnqueueTaskFunc("create-file", func (s *Spec, tk *Task) error {
     // Assert an error is returned on a non-zero exit code
@@ -270,5 +274,146 @@ func TestTaskCommand (t *testing.T) {
 
   if err := root.Run(); err != nil {
     t.Fatal(err)
+  }
+}
+
+
+func TestTaskPassAsset (t *testing.T) {
+  /*
+    These strings encode definitions of simple task queues, each
+    a test case. Each character represents another Task. All
+    Funcs and MapFuncs are the same. Digits represent a task with
+    one of the following configurations:
+      0: No MapFunc, no Func
+      1: No MapFunc,    Func
+      2:    MapFunc, no Func
+      3:    MapFunc,    Func
+
+    Each task queue is given a task which produces an asset with
+    a 
+  */
+  var test_cases = []struct {
+    Tasks     string
+    Expect    []byte
+    WillError bool
+  }{
+    { Tasks:     "", Expect: []byte{0} }, // Test it works with nothing
+    { Tasks:    "2", Expect: []byte{1} }, // Test a single map
+    { Tasks: "2222", Expect: []byte{4} }, // Test cumulative map functions
+    { Tasks:  "111", Expect: []byte{0, 0, 0, 0} },
+    { Tasks:    "0", WillError: true },
+    { Tasks:  "220", WillError: true },
+  }
+
+  var assetTaskMapFunc = func (a *Asset) (*Asset, error) {
+    a.ContentBytes[len(a.ContentBytes)-1]++
+    return a, nil
+  }
+
+  var assetTaskFunc = func (s *Spec, tk *Task) error {
+    for _, asset_chunk := range tk.Assets {
+      assets, err := asset_chunk.Flatten()
+      if err != nil { return err }
+
+      for _, asset := range assets {
+        asset.ContentBytes = append(asset.ContentBytes, 0)
+        tk.PassSingularAsset(asset)
+      }
+    }
+
+    return nil
+  }
+
+  // Set up and run each test case
+  //
+  for test_case_i, test_case := range test_cases {
+    t.Logf("Test case #%d: %v", test_case_i, test_case)
+
+    var root *Spec = NewSpec(fmt.Sprintf("root-case-%d", test_case_i), nil)
+    var spec *Spec = root.AddSubspec(NewSpec("spec", nil))
+
+    root.Props["quiet"] = true
+
+    root.EnqueueTaskFunc("root-consume", func (s *Spec, tk *Task) error {
+      var num_assets = 0
+
+      for { select {
+      case <- tk.CancelChan:
+        return nil
+
+      case asset_chunk, ok := <- s.Input:
+        if !ok {
+          return nil
+        }
+
+        assets, err := asset_chunk.Flatten()
+        if err != nil { return err }
+
+        for _, asset := range assets {
+          num_assets++
+          content_bytes, err := asset.GetContentBytes()
+          if err != nil { t.Fatal(err) }
+
+          if string(content_bytes) != string(test_case.Expect) {
+            t.Fatalf(
+              "Test case #%d expects an asset content of %v, got %v",
+              test_case_i, test_case.Expect, content_bytes,
+            )
+          }
+        }
+      }}
+
+      expect_num_assets := 1
+      if test_case.WillError {
+        expect_num_assets = 0
+      }
+
+      if got := num_assets; got != expect_num_assets {
+        t.Fatalf(
+          "Test case #%d expected %d assets, got %d",
+          test_case_i, expect_num_assets, got,
+        )
+      }
+      return nil
+    })
+
+    spec.PushTaskFunc("produce", func (s *Spec, tk *Task) error {
+      asset := s.MakeAsset("asset.txt")
+      asset.SetContentBytes([]byte{ 0 })
+      tk.PassSingularAsset(asset)
+      return nil
+    })
+
+    // Decode the test case's task sequence into tasks in the task queue
+    //
+    for _, char := range test_case.Tasks {
+      var task *Task = spec.NewTask("")
+      switch char {
+      case '0':
+        task.Name    = "empty"
+      case '1':
+        task.Name    = "func"
+        task.Func    = assetTaskFunc
+      case '2':
+        task.Name    = "map"
+        task.MapFunc = assetTaskMapFunc
+      case '3':
+        task.Name    = "map-func"
+        task.Func    = assetTaskFunc
+        task.MapFunc = assetTaskMapFunc
+      }
+      spec.PushTask(task)
+    }
+
+    // TODO: if this is ran with spec.Run() instead of root.Run(), it will timeout. This may be the sign of a problem.
+    if err := root.Run(); err != nil {
+      if test_case.WillError == false {
+        t.Fatalf("Test case #%d errored: %v", test_case_i, err)
+      }
+    } else {
+      if test_case.WillError {
+        t.Fatalf("Test case #%d was expected to error, but did not", test_case_i)
+      }
+    }
   }
 }

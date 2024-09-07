@@ -4,6 +4,7 @@ import (
   "testing"
   "fmt"
   "strings"
+  "io"
 )
 
 
@@ -134,6 +135,41 @@ func TestSpecChildRunEmitConsumesAssetFinishes (t *testing.T) {
   })
 
   TestWrapTimeoutError(t, root.Run)
+}
+
+
+func TestSpecTaskCancelledBySubspecError (t *testing.T) {
+  root    := NewSpec("root", nil)
+  subspec := root.AddSubspec(NewSpec("subspec", nil))
+
+  root.Props["quiet"] = true
+
+  root.EnqueueTaskFunc("cancellable-consume", func (s *Spec, tk *Task) error {
+    for { select {
+      case <-tk.CancelChan:
+        return nil
+      case asset_chunk, ok := <-s.Input:
+        if ok {
+          t.Fatalf("Spec received unexpected asset chunk: %v", asset_chunk)
+        }
+    }}
+    return nil
+  })
+
+  subspec.EnqueueTaskFunc("error", func (s *Spec, tk *Task) error {
+    return fmt.Errorf("Expected error")
+  })
+
+  TestWrapTimeout(t, func () {
+    if err := subspec.Run(); err == nil {
+      t.Fatal("Expected specs to error, but no error was returned")
+    } else {
+      error_str := fmt.Sprintf("%v", err)
+      if ! strings.Contains(error_str, "Expected error") {
+        t.Fatalf("Spec exited with an error, but it was not the expected error: %v", err)
+      }
+    }
+  })
 }
 
 
@@ -281,23 +317,24 @@ func TestSprintSpec (t *testing.T) {
 }
 
 
-func TestSpecInternalTaskBuffer (t *testing.T) {
+func TestTaskPassAssetsToSpec (t *testing.T) {
   var root    *Spec = NewSpec("root", nil)
   var subspec *Spec = root.AddSubspec(NewSpec("subspec", nil))
 
   subspec.EnqueueTaskFunc("produce", func (s *Spec, tk *Task) error {
     for i := range 3 {
-      asset := s.AddAsset( s.MakeAsset( fmt.Sprintf("%d", i) ) )
+      asset := s.MakeAsset( fmt.Sprintf("%d", i) ) 
       asset.SetContentBytes(
         []byte( fmt.Sprintf("content %d", i) ),
       )
+      tk.PassSingularAsset(asset)
       tk.Println(asset.Url)
     }
     return nil
   })
 
   subspec.EnqueueTaskFunc("mutate", func (s *Spec, tk *Task) error {
-    for _, asset := range s.Assets {
+    for _, asset := range tk.Assets {
       // Read and modify the content of the asset
       content, err := asset.GetContentBytes()
       if err != nil { return nil }
@@ -309,7 +346,15 @@ func TestSpecInternalTaskBuffer (t *testing.T) {
   })
 
   root.EnqueueTaskFunc("consume-assert", func (s *Spec, tk *Task) error {
-    for asset_chunk := range s.Input {
+    for { select {
+    case <-tk.CancelChan:
+      return nil
+
+    case asset_chunk, ok := <-s.Input:
+      if !ok {
+        return nil
+      }
+
       assets, err := asset_chunk.Flatten()
       if err != nil { return err }
 
@@ -332,12 +377,183 @@ func TestSpecInternalTaskBuffer (t *testing.T) {
           }
         }
       }
-    }
+    }}
 
     return nil
   })
 
   if err := root.Run(); err != nil {
     t.Fatal(err)
+  }
+}
+
+
+/*
+  Test a pipeline which uses inter-task asset passing, a content
+  data reader function, and applies a PathTransformation to
+  strings inside the string content of the assets.
+*/
+func TestTaskMapFuncPathTransformPipeline (t *testing.T) {
+  root := NewSpec("root", nil)
+  var output_dir = t.TempDir()
+  root.Props["source_dir"] = output_dir
+  root.Props["quiet"] = true
+
+  // Path transformation
+  //
+  path_transformations, err := PathTransformationsFromAny("s`REPLACE-THIS`THIS-REPLACED`")
+  if err != nil { t.Fatal(err) }
+  root.PathTransformations = path_transformations
+
+  // Produce an asset and pass it
+  //
+  root.EnqueueTaskFunc("produce", func (s *Spec, tk *Task) error {
+    // Produce a .txt asset, on which to apply PathTransformations
+    //
+    err := s.WriteFile("asset.txt", []byte(`
+      REPLACE-THIS
+      dont-replace-this
+    `), 0o660)
+    if err != nil {
+      return fmt.Errorf("Could not write asset file to produce: %w", err)
+    }
+
+    eventually_mutated_asset, err := s.MakeFileKeyAsset("asset.txt")
+    if err != nil { return err }
+
+    if err := tk.PassSingularAsset(eventually_mutated_asset); err != nil {
+      return err
+    }
+
+    // Produce a control asset with no modifications to apply
+    //
+    err = s.WriteFile("control.bin", []byte(`
+      ...binary data with incidental valid path transformation...
+      REPLACE_THIS
+      ...more binary data...
+      dont-replace-this
+      ...the last data...
+    `), 0o660)
+
+    if err != nil {
+      return fmt.Errorf("Could not write asset file to produce: %w", err)
+    }
+
+    control_asset, err := s.MakeFileKeyAsset("control.bin")
+    if err != nil { return err }
+
+    if err := tk.PassSingularAsset(control_asset); err != nil {
+      return err
+    }
+
+    return nil
+  })
+
+  // Assign text data handlers
+  //
+  root.EnqueueTaskMapFunc("type-txt-loader", func (a *Asset) (*Asset, error) {
+    if ! strings.HasPrefix(a.Mimetype, "text") {
+      return a, nil
+    }
+
+    err := a.SetContentDataReadFunc(func (s *Asset, r io.Reader) (any, error) {
+      bytes, err := io.ReadAll(r)
+      if err != nil { return "", err }
+      return string(bytes), nil
+    })
+    if err != nil { return nil, err }
+
+    err = a.SetContentDataWriteFunc(
+      func (a *Asset, w io.Writer, data any) (int, error) {
+        return w.Write([]byte(data.(string)))
+      },
+    )
+    if err != nil { return nil, err }
+
+    return a, nil
+  })
+
+  // Transform paths in text based on path transformations
+  //
+  root.EnqueueTaskMapFunc("text-transform", func (a *Asset) (*Asset, error) {
+    // Only map over text
+    //
+    if ! strings.HasPrefix(a.Mimetype, "text") {
+      return a, nil
+    }
+
+    content_any, err := a.GetContentData()
+    if err != nil {
+      return nil, fmt.Errorf(
+        "Cannot get content data in text-transform on asset %s: %w", a.Url, err,
+      )
+    }
+
+    var content string
+    var ok      bool
+
+    if content, ok = content_any.(string); ok == false {
+      return nil, fmt.Errorf("ContentData is not a string")
+    }
+
+    var lines    []string = strings.Split(content, "\n")
+    var modified bool
+
+    for line_i, line := range lines {
+      for _, transformation := range a.Spec.PathTransformations {
+        new_line := transformation.TransformPath(line)
+        modified = modified || (new_line != line)
+        lines[line_i] = new_line
+      }
+    }
+
+    if modified {
+      a.SetContentData(strings.Join(lines, "\n"))
+    }
+
+    return a, nil
+  })
+
+  // Consume assets
+  //
+  var num_consumed = 0
+  root.EnqueueTaskFunc("consume", func (s *Spec, tk *Task) error {
+    for _, asset := range tk.Assets {
+      num_consumed++
+
+      content, err := asset.GetContentBytes()
+      if err != nil { return err }
+
+      key := strings.TrimLeft(asset.Url.Path, "/")
+      switch key {
+      default:
+        t.Errorf("Unexpected asset key: %s", key)
+      case "asset.txt":
+        if ! strings.Contains(string(content), "THIS-REPLACED") {
+          t.Fatalf("asset.txt does not content \"THIS-REPLACED\"")
+        }
+        if ! strings.Contains(string(content), "dont-replace-this") {
+          t.Fatalf("control.bin does not contain \"dont-replace-this\"")
+        }
+        t.Log("asset:")
+        t.Log(string(content))
+      case "control.bin":
+        if ! strings.Contains(string(content), "REPLACE_THIS") {
+          t.Fatalf("control.bin does not contain \"REPLACE_THIS\"")
+        }
+        if ! strings.Contains(string(content), "dont-replace-this") {
+          t.Fatalf("control.bin does not contain \"dont-replace-this\"")
+        }
+      }
+    }
+    return nil
+  })
+
+  if err := root.Run(); err != nil {
+    t.Fatal(err)
+  }
+
+  if got, expect := num_consumed, 2; got != expect {
+    t.Errorf("Consume task expected %d assets, got %d", expect, got)
   }
 }

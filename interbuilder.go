@@ -36,7 +36,6 @@ type Spec struct {
 
   Input           chan *Asset
   InputGroup      sync.WaitGroup
-  Assets          []*Asset
 
   PathTransformations []*PathTransformation
 
@@ -190,14 +189,17 @@ func (s *Spec) Run () error {
   defer s.Printf("[%s] Exit\n", s.Name)
   defer s.Done()
 
+  var error_chan       = make(chan error)
+  var cancel_task_chan = make(chan bool)
+
   // Run subspecs in parallel goroutines
   //
   for _, subspec := range s.Subspecs {
     go func () {
-      // TODO: give subspecs a quit signal
       err := subspec.Run()
       if err != nil {
-        // TODO: terminate this spec (this, being that of s.Run)
+        error_chan <- fmt.Errorf("Error in subspec \"%s\": %w", subspec.Name, err)
+        cancel_task_chan <- true
       }
     }()
   }
@@ -219,14 +221,30 @@ func (s *Spec) Run () error {
   s.CurrentTask = task
   s.task_queue_lock.Unlock()
 
+  TASK_LOOP:
   for task != nil {
+    select {
+    default:
+      // pass
+    case <-cancel_task_chan:
+      break TASK_LOOP
+    }
+
     // Assert a valid task queue, going forward
     //
     if t := s.Tasks.GetCircularTask(); t != nil {
       return fmt.Errorf(
-        "[%s] Error: repeating (circular) task entry in task list: %s\n",
+        "[%s] Error: repeating (circular) task entry in task list: %s",
         s.Name, t.ResolverId,
       )
+    }
+
+    if (task.Func == nil) && (task.MapFunc == nil) {
+      err := fmt.Errorf(
+        "[%s] Error: task \"%s\" doesn't have a Func or MapFunc defined",
+        s.Name, task.Name,
+      )
+      return err
     }
 
     // Run the task
@@ -236,6 +254,8 @@ func (s *Spec) Run () error {
     } else {
       s.Printf("[%s] task: %s (%s)\n", s.Name, task.Name, task.ResolverId)
     }
+
+    task.CancelChan = cancel_task_chan  // Pass by reference
 
     if err := task.Run(s); err != nil {
       if task.ResolverId != "" {
@@ -251,6 +271,8 @@ func (s *Spec) Run () error {
       }
     }
 
+    task.CancelChan = nil
+
     // Flush the push queue and advance to the next task. Merge
     // the internal asset buffer into the next task.
     //
@@ -263,6 +285,16 @@ func (s *Spec) Run () error {
     s.task_queue_lock.Unlock()
   }
 
+  // Now that the task loop has closed, receive an error from
+  // subspecs, if applicable
+  //
+  select {
+  case err := <-error_chan:
+    return err
+  default:
+    // pass
+  }
+
   // Emit any remaining assets
   //
   for asset := range s.Input {
@@ -272,26 +304,11 @@ func (s *Spec) Run () error {
 
   var internal_asset_chunk *Asset
 
-  switch len(s.Assets) {
-    case 0:
-      // pass
-
-    default:
-      asset_chunk := s.MakeAsset("")
-      asset_chunk.SetAssetArray(s.Assets)
-      internal_asset_chunk = asset_chunk
-
-    case 1: 
-      internal_asset_chunk = s.Assets[0]
-  }
-
   if internal_asset_chunk != nil {
     if err := s.EmitAsset(internal_asset_chunk); err != nil {
       return err
     }
   }
-
-  s.Assets = nil
 
   // For the above range to finish, s.Input must be closed. This
   // function runs a goroutine which waits for the subspecs to

@@ -33,7 +33,7 @@ const (
   ASSET_SINGLE_BYTE_R   uint64 = 0b_000_001 // Byte reader
   ASSET_SINGLE_BYTE_W   uint64 = 0b_000_010 // Byte writer
   ASSET_SINGLE_DATA_R   uint64 = 0b_000_100 // Data reader
-  ASSET_SINGLE_DATA_W   uint64 = 0b_000_100 // Data writer
+  ASSET_SINGLE_DATA_W   uint64 = 0b_001_000 // Data writer
 
   /* Mult-asset types: how it is expanded into other assets */
   ASSET_MULTI_ARRAY     uint64 = 0b_100_001
@@ -243,17 +243,8 @@ func (s *Spec) WriteFile (key string, data []byte, perm fs.FileMode) error {
 }
 
 
-/*
-  AddAsset adds an asset to the Spec's internal asset buffer.
-  Returns the asset.
-*/
-func (s *Spec) AddAsset (a *Asset) (*Asset) {
-  s.Assets = append(s.Assets, a)
-  return a
-}
-
-
 func (s *Spec) EmitAsset (a *Asset) error {
+
   if a.Url == nil {
     return fmt.Errorf("Cannot emit asset with a nil URL")
   }
@@ -630,33 +621,55 @@ func (a *Asset) ContentBytesGetWriter () (io.Writer, error) {
 }
 
 
+func (a *Asset) writeContentDataToContentBytes () ([]byte, error) {
+  // Read ContentData into ContentBytes, and set the parity
+  // flag.
+
+  writer := bytes.NewBuffer([]byte{})
+  if _, err := a.WriteContentDataTo(writer); err != nil {
+    return nil, fmt.Errorf("Error writing asset content data to asset content bytes: %w", err)
+  }
+  a.ContentBytes = writer.Bytes()
+
+  a.has_byte_data_parity = true
+  return a.ContentBytes, nil
+}
+
+
 func (a *Asset) GetContentBytes () ([]byte, error) {
   if ! a.IsSingle() {
     return nil, fmt.Errorf("Asset is not singular")
   }
 
-  if a.ContentBytes != nil {
-    if a.ContentDataModified {
-      if a.has_byte_data_parity {
-        return a.ContentBytes, nil
-      }
+  if a.ContentData != nil {
+    if a.ContentBytes == nil {
+      return a.writeContentDataToContentBytes()
+    }
 
-      // Read ContentData into ContentBytes, and set the parity
-      // flag.
-
-      writer := bytes.NewBuffer([]byte{})
-      if _, err := a.WriteContentDataTo(writer); err != nil {
-        return nil, err
-      }
-      a.ContentBytes = writer.Bytes()
-
-      a.has_byte_data_parity = true
+    // Content data and bytes are defined. If they're in the same
+    // state, we can return the bytes data.
+    //
+    if a.has_byte_data_parity {
       return a.ContentBytes, nil
     }
 
-    // The content data is not modified. Therefore, the
-    // content bytes can be returned as-is.
+    // ContentData and ContentBytes are both defined, but do not
+    // have parity. If only one of them is modified, try to use
+    // that one.
     //
+    if a.ContentDataModified && a.ContentModified {
+      return nil, fmt.Errorf("Asset has divergent content and data modifications")
+    } else if a.ContentDataModified {
+      return a.ContentBytes, nil
+    } else if a.ContentModified {
+      return a.writeContentDataToContentBytes()
+    }
+
+    // Nothing is modified. Do not return and continue trying to
+    // read bytes.
+  }
+
+  if a.ContentBytes != nil {
     return a.ContentBytes, nil
   }
 

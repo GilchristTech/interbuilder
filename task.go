@@ -9,6 +9,7 @@ import (
 )
 
 type TaskFunc      func (*Spec, *Task) error
+type TaskMapFunc   func (*Asset) (*Asset, error)
 type TaskMatchFunc func (name string, spec *Spec) (bool, error)
 
 
@@ -33,9 +34,15 @@ type Task struct {
   Resolver   *TaskResolver
   Name       string
   Started    bool
-  Func       TaskFunc
   Next       *Task
   History    HistoryEntry
+
+  Assets     []*Asset
+
+  Func       TaskFunc
+  MapFunc    TaskMapFunc
+
+  CancelChan chan bool
 }
 
 
@@ -226,13 +233,39 @@ func (t *Task) CommandRun (name string, args ...string) (*exec.Cmd, error) {
 }
 
 
-func (t *Task) Run (s *Spec) error {
-  if t.Func == nil {
-    return fmt.Errorf("Error: Task.Func is nil")
+func (tk *Task) Run (s *Spec) error {
+  // If this task has an asset map function, apply it to the
+  // asset buffer.
+  //
+  if tk.MapFunc != nil {
+    tk.Started = true
+    mapped_assets := make([]*Asset, 0, len(tk.Assets))
+    for _, asset := range tk.Assets {
+      mapped_asset, err := tk.MapFunc(asset)
+
+      if err != nil {
+        return fmt.Errorf("Error while mapping assets in task: %w", err)
+      }
+
+      if mapped_asset != nil {
+        mapped_assets = append(mapped_assets, asset)
+      }
+    }
+    tk.Assets = mapped_assets
+
+    if tk.Func != nil {
+      return tk.Func(s, tk)
+    }
+
+    return nil
   }
 
-  t.Started = true
-  return t.Func(s, t)
+  if tk.Func == nil {
+    return fmt.Errorf("Both Task.Func and Task.MapFunc are nil")
+  }
+
+  tk.Started = true
+  return tk.Func(s, tk)
 }
 
 
@@ -295,11 +328,28 @@ func (s *Spec) GetTask (name string, spec *Spec) (*Task, error) {
 }
 
 
+func (s *Spec) NewTask (name string) *Task {
+  return & Task  {
+    Spec: s,
+    Name: name,
+  }
+}
+
+
 func (s *Spec) NewTaskFunc (name string, f TaskFunc) *Task {
   return & Task {
     Spec: s,
     Name: name,
     Func: f,
+  }
+}
+
+
+func (s *Spec) NewTaskMapFunc (name string, f TaskMapFunc) *Task {
+  return & Task {
+    Spec: s,
+    Name: name,
+    MapFunc: f,
   }
 }
 
@@ -340,6 +390,16 @@ func (s *Spec) EnqueueTask (t *Task) *Task {
 */
 func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) *Task {
   return s.EnqueueTask(s.NewTaskFunc(name, f))
+}
+
+
+/*
+  EnqueueTaskMapFunc creates a new Task with the specified name
+  and asset map function (`f`), enqueues it for execution in the
+  task queue, and returns it.
+*/
+func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) *Task {
+  return s.EnqueueTask(s.NewTaskMapFunc(name, f))
 }
 
 
@@ -516,4 +576,73 @@ func (s *Spec) flushTaskPushQueue () *Task {
   }
 
   return s.CurrentTask.insertRange(start, end)
+}
+
+
+/*
+  PassSingularAsset sends an asset to
+*/
+func (tk *Task) PassSingularAsset (a *Asset) error {
+  if ! a.IsSingle() {
+    return fmt.Errorf("Cannot pass, asset is not singular")
+  }
+
+  var asset *Asset = a
+  var err   error
+
+  // If this is the final task, the only place left for the asset
+  // to go is being emitted by the Spec. Do so if it exists.
+  //
+  if tk.Next == nil {
+    if tk.Spec != nil {
+      return tk.Spec.EmitAsset(a)
+    }
+    return nil
+  }
+
+  // There is a task after this one. If it has no MapFunc, this
+  // asset reference is valid and that task its destination,
+  // because the Func or Spec may need to operate with the Task's
+  // Asset buffer.
+  //
+  if tk.Next.MapFunc == nil {
+    tk.Next.AddAsset(asset)
+    return nil
+  }
+
+  // There is a next task, and it has a MapFunc. Replace the
+  // asset with a new reference.
+  //
+  asset, err = tk.Next.MapFunc(asset)
+  if err != nil { return err }
+  if asset == nil { return nil }
+
+  // With the new asset, if the next task has a Func, then it is
+  // the destination, since the Func may mutate the asset via its
+  // task buffer.
+  //
+  if tk.Next.Func != nil {
+    tk.Next.AddAsset(asset)
+    return nil
+  }
+
+  // There is a next task, we have a valid (map-function-applied)
+  // asset for it, and this task has no Func to mutate the asset
+  // further.  Recurse, sending the asset as far as it can go in
+  // the Task without requiring the task queue to synchronize up
+  // until that point.
+  //
+  return tk.Next.PassSingularAsset(asset)
+}
+
+
+/*
+  AddAsset adds an asset to the Task's internal asset buffer.
+  Returns the asset.
+*/
+func (tk *Task) AddAsset (a *Asset) *Asset {
+  if a != nil {
+    tk.Assets = append(tk.Assets, a)
+  }
+  return a
 }
