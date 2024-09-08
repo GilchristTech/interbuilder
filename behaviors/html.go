@@ -5,6 +5,7 @@ import (
   "net/url"
   "fmt"
   "golang.org/x/net/html"
+  "io"
 )
 
 
@@ -21,7 +22,6 @@ func HtmlNodeApplyPathTransformations (node *html.Node, base_url *url.URL, trans
         }
 
         href_url := base_url.ResolveReference(href_relative)
-        fmt.Println("url:", href_url)
 
         var original_path string = href_url.Path
         var path          string = original_path
@@ -39,8 +39,6 @@ func HtmlNodeApplyPathTransformations (node *html.Node, base_url *url.URL, trans
           } else {
             node.Attr[attr_i].Val = href_url.String()
           }
-
-          fmt.Println("modified:", node.Attr[attr_i].Val)
         }
       }
     }
@@ -51,4 +49,23 @@ func HtmlNodeApplyPathTransformations (node *html.Node, base_url *url.URL, trans
   }
 
   return modified
+}
+
+
+func AssetContentDataReadHtml (a *Asset, r io.Reader) (any, error) {
+  html_doc, err := html.Parse(r)
+  if err != nil {
+    return nil, fmt.Errorf("Error reading content data: %w", err)
+  }
+  return html_doc, nil
+}
+
+
+func AssetContentDataWriteHtml (a *Asset, w io.Writer, content_data any) (int, error) {
+  html_doc, ok := content_data.(*html.Node)
+  if !ok {
+    return 0, fmt.Errorf("Error writing content data: expected content data to be an *html.Doc, got %T", content_data)
+  }
+  
+  return -1, html.Render(w, html_doc)
 }

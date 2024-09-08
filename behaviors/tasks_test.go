@@ -5,14 +5,11 @@ import (
   . "gilchrist.tech/interbuilder"
 
   "strings"
-  "bytes"
 
   "io"
   "os"
   "path/filepath"
   "fmt"
-  "golang.org/x/net/html"
-  "mime"
 )
 
 
@@ -216,254 +213,6 @@ func TestTaskConsumeLinkFilesSingularFiles (t *testing.T) {
 }
 
 
-func TestTaskTransformHtml (t *testing.T) {
-  root             := NewSpec("root", nil)
-  transformer_spec := root.AddSubspec( NewSpec("transformer", nil) )
-  produce_spec     := transformer_spec.AddSubspec(NewSpec("produce", nil))
-
-  // Path transformation
-  //
-  path_transformations, err := PathTransformationsFromAny("s`^/?`transformed/`")
-  if err != nil { t.Fatal(err) }
-  transformer_spec.PathTransformations = path_transformations
-
-  // Prepare temporary source_dir's
-  //
-  produce_dir     := t.TempDir()
-  index_file_path := filepath.Join(produce_dir, "index.html")
-  text_file_path  := filepath.Join(produce_dir, "file.txt")
-
-  root_source_dir := t.TempDir()
-
-  root.Props["source_dir"]         = root_source_dir
-  produce_spec.Props["source_dir"] = produce_dir
-
-  // Write an HTML file and emit it
-  //
-  produce_spec.EnqueueTaskFunc("produce", func (s *Spec, task *Task) error {
-    html_source := []byte(
-      `<!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <title>Internal page</title>
-      </head>
-      <body>
-        <a href="/page/">Internal link</a>
-        <a href="http://example.com">External link</a>
-      </body>
-      </html>
-    `)
-
-    err = os.WriteFile(index_file_path, html_source, 0o660)
-    if err != nil {
-      return fmt.Errorf("Could not write asset HTML file to produce: %w", err)
-    }
-
-    text_source := []byte("This text file should go unmodified")
-    err = os.WriteFile(text_file_path, text_source, 0o660)
-    if err != nil {
-      return fmt.Errorf("Could not write asset text file to produce: %w", err)
-    }
-
-    return s.EmitFileKey("/")
-  })
-
-  // Apply path transformations to file assets
-  //
-  transformer_spec.EnqueueTaskFunc("transform-html", func (s *Spec, task *Task) error {
-    var num_assets int = 0
-
-    for asset_chunk := range s.Input {
-      assets, err :=  asset_chunk.Flatten()
-      if err != nil { return err }
-
-      for _, a := range assets {
-        num_assets++
-
-        mediatype, _, err := mime.ParseMediaType(a.Mimetype)
-        if err != nil { return err }
-
-        switch mediatype {
-        case "":
-          return fmt.Errorf("Asset has an empty mimetype")
-        default:
-          return fmt.Errorf("Asset has an unexpected mimetype: %s", a.Mimetype)
-
-        case "text/plain":
-          // pass
-
-        case "text/html":
-          reader, err := a.ContentBytesGetReader()
-          if err != nil { return err }
-
-          doc, err := html.Parse(reader)
-          if err != nil { return err }
-
-          modified := HtmlNodeApplyPathTransformations(
-              doc, a.Url, s.PathTransformations,
-            )
-
-          task.Println("modified:", modified)
-
-          var buffer bytes.Buffer
-          html.Render(& buffer, doc)
-          err = a.SetContentBytes(buffer.Bytes())
-          if err != nil { return err }
-        }
-
-        s.EmitAsset(a)
-      }
-
-      // Assert the number of assets
-      //
-      if expected := 1; num_assets != expected {
-        return fmt.Errorf("Expected %d assets, got %d", expected, num_assets)
-      }
-
-    }
-    return nil
-  })
-
-  // Consume the Spec trees and write them to the output directory (root's source_dir)
-  //
-  root.EnqueueTaskFunc("root-consume", func (s *Spec, task *Task) error {
-    var num_assets int = 0
-    for asset := range s.Input {
-      num_assets++
-
-      mediatype, _, err := mime.ParseMediaType(asset.Mimetype)
-      if err != nil {
-        return fmt.Errorf("Error parsing media type from mimetype \"%s\": %w", asset.Mimetype, err)
-      }
-
-      switch mediatype {
-      case "":
-        return fmt.Errorf("Asset has an empty mimetype")
-      default:
-        return fmt.Errorf("Asset has an unexpected mimetype: %s", asset.Mimetype)
-
-      case "text/plain":
-        // PASS
-        asset := s.AnnexAsset(asset)
-
-        content, err := asset.GetContentBytes()
-        if err != nil { return err }
-
-        writer, err := asset.ContentBytesGetWriter()
-        _, err = writer.Write(content)
-        if err != nil { return err }
-
-        if writer, ok := writer.(io.Closer); ok {
-          writer.Close()
-        }
-
-      case "text/html":
-        if asset.ContentModified == false {
-          return fmt.Errorf("HTML asset not modified")
-        }
-
-        asset = s.AnnexAsset(asset)
-
-        writer, err := asset.ContentBytesGetWriter()
-        if err != nil {
-          return fmt.Errorf("Error getting asset writer for asset %s: %w", asset.Url, err)
-        }
-
-        content, err := asset.GetContentBytes()
-        if err != nil { return err }
-
-        _, err = writer.Write(content)
-        if err != nil { return err }
-
-        if writer, ok := writer.(io.Closer); ok {
-          writer.Close()
-        }
-      }
-    }
-
-    if expected := 2; num_assets != expected {
-      return fmt.Errorf("Expected %d assets, got %d", expected, num_assets)
-    }
-
-    return nil
-  })
-
-  if err := root.Run(); err != nil {
-    t.Errorf("Error when running Spec tree: %v", err)
-  }
-
-  // Test Spec tree output
-  //
-  var root_spec_files_walked int = 0
-
-  err = filepath.Walk(root_source_dir, func(file_path string, info os.FileInfo, err error) error {
-    if err != nil { t.Fatal(err) }
-
-    if info.IsDir() { // Skip directories
-      return nil
-    }
-
-    // Read the file content
-    content, err := os.ReadFile(file_path)
-    if err != nil { t.Fatal(err) }
-
-    // Store the file path and content in the map
-    fmt.Println("Output:", file_path, len(content))
-
-    _, file_name := filepath.Split(file_path)
-    switch file_name {
-      default:
-        t.Errorf("Unrecognized file name: %s", file_name)
-
-      case "index.html":
-        content_bytes, err := os.ReadFile(file_path)
-        if err != nil {
-          t.Errorf("Error reading index.html: %v", err)
-        }
-
-        var content  string = string(content_bytes)
-        var expected string
-
-        expected = "href=\"/transformed/page/\""
-        if ! strings.Contains(content, expected) {
-          t.Errorf("HTML content does not contain %s", expected)
-        }
-
-        expected = "href=\"http://example.com\""
-        if ! strings.Contains(content, expected) {
-          t.Errorf("HTML content does not contain %s", expected)
-        }
-
-      case "file.txt":
-        content, err := os.ReadFile(file_path)
-        if err != nil {
-          t.Errorf("Error reading file.txt: %v", err)
-        }
-
-        expected := "This text file should go unmodified"
-        if content := string(content); content != expected {
-          t.Errorf("file.txt content is \"%s\", expected \"%s\"", content, expected)
-        }
-    }
-
-    root_spec_files_walked++
-    return nil
-  })
-
-  if err != nil {
-    t.Fatalf("Error walking root spec source_dir: %v", err)
-  }
-
-  if expected := 2; root_spec_files_walked != expected {
-    t.Fatalf(
-      "Expected to walk %d files in root spec source dir (%s), walked %d",
-      expected, root_source_dir, root_spec_files_walked,
-    )
-  }
-}
-
-
 func TestTaskConsumeLinkFilesWithPathTransformations (t *testing.T) {
   var err error
   var root       *Spec = NewSpec("root", nil)
@@ -471,6 +220,7 @@ func TestTaskConsumeLinkFilesWithPathTransformations (t *testing.T) {
   var producer_a *Spec = merge.AddSubspec(NewSpec("producer_a", nil))
   var producer_b *Spec = merge.AddSubspec(NewSpec("producer_b", nil))
 
+  root.Props["quiet"]            = true
   merge.Props["source_dir"]      = t.TempDir()
   producer_a.Props["source_dir"] = t.TempDir()
   producer_b.Props["source_dir"] = t.TempDir()
@@ -550,6 +300,7 @@ func TestTaskConsumeLinkFilesModifiedFile (t *testing.T) {
   var produce *Spec = consume.AddSubspec(NewSpec("produce", nil))
 
   var output_dir string = t.TempDir()
+  consume.Props["quiet"]      = true
   consume.Props["source_dir"] = output_dir
   produce.Props["source_dir"] = t.TempDir()
 

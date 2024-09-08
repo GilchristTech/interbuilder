@@ -614,7 +614,9 @@ func (tk *Task) PassSingularAsset (a *Asset) error {
   // asset with a new reference.
   //
   asset, err = tk.Next.MapFunc(asset)
-  if err != nil { return err }
+  if err != nil {
+    return fmt.Errorf("Error in task %s: %w", tk.Next.Name, err)
+  }
   if asset == nil { return nil }
 
   // With the new asset, if the next task has a Func, then it is
