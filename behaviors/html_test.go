@@ -4,7 +4,6 @@ import (
   . "gilchrist.tech/interbuilder"
   "testing"
   "fmt"
-  "golang.org/x/net/html"
   "strings"
   "os"
   "path/filepath"
@@ -55,7 +54,6 @@ func TestHtmlPipeline (t *testing.T) {
 
     // Write control TXT file
     //
-
     txt_source := []byte("This text file should go unmodified")
 
     if err := s.WriteFile("file.txt", txt_source, 0o660); err != nil {
@@ -70,45 +68,11 @@ func TestHtmlPipeline (t *testing.T) {
     return nil
   })
 
-  // Assign HTML data handlers
+  // Assign HTML ContentData handlers and transform links in HTML
+  // based on path transformations
   //
-  spec.EnqueueTaskMapFunc("html-loader", func (a *Asset) (*Asset, error) {
-    if ! strings.HasPrefix(a.Mimetype, "text/html") {
-      return a, nil
-    }
-
-    if err := a.SetContentDataReadFunc(AssetContentDataReadHtml); err != nil {
-      return nil, err
-    }
-
-    if err := a.SetContentDataWriteFunc(AssetContentDataWriteHtml); err != nil {
-      return nil, err
-    }
-
-    return a, nil
-  })
-
-  // Transform links in HTML based on path transformations
-  //
-  spec.EnqueueTaskMapFunc("html-transform", func (a *Asset) (*Asset, error) {
-    if ! strings.HasPrefix(a.Mimetype, "text/html") {
-      return a, nil
-    }
-
-    doc_any, err := a.GetContentData()
-    if err != nil { return nil, err }
-    doc := doc_any.(*html.Node)
-
-    modified := HtmlNodeApplyPathTransformations(
-        doc, a.Url, a.Spec.PathTransformations,
-      )
-
-    if modified {
-      a.SetContentData(doc)
-    }
-
-    return a, nil
-  })
+  spec.EnqueueTaskMapFunc("html-loader", TaskMapContentDataHtmlHandlers)
+  spec.EnqueueTaskMapFunc("html-transform", TaskMapApplyPathTransformationsToHtmlContent)
 
   // Consume assets
   //
