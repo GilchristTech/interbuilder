@@ -6,8 +6,20 @@ import (
   "fmt"
   "golang.org/x/net/html"
   "io"
-  "strings"
 )
+
+
+var TaskResolverApplyPathTransformationsToHtmlContent = TaskResolver {
+  Id:   "apply-path-transformations-html-content",
+  Name: "apply-path-transformations",
+  MatchFunc: func (name string, spec *Spec) (bool, error) {
+    return len(spec.PathTransformations) > 0, nil
+  },
+  TaskPrototype: Task {
+    MatchMimePrefix: "text/html",
+    MapFunc: TaskMapApplyPathTransformationsToHtmlContent,
+  },
+}
 
 
 /*
@@ -68,7 +80,7 @@ func HtmlNodeApplyPathTransformations (node *html.Node, base_url *url.URL, trans
 func AssetContentDataReadHtml (a *Asset, r io.Reader) (any, error) {
   html_doc, err := html.Parse(r)
   if err != nil {
-    return nil, fmt.Errorf("Error reading content data: %w", err)
+    return nil, fmt.Errorf("Error parsing HTML content data: %w", err)
   }
   return html_doc, nil
 }
@@ -95,15 +107,19 @@ func AssetContentDataWriteHtml (a *Asset, w io.Writer, content_data any) (int, e
   returned as-is.
 */
 func TaskMapContentDataHtmlHandlers (a *Asset) (*Asset, error) {
-  if ! strings.HasPrefix(a.Mimetype, "text/html") {
+  // if ! strings.HasPrefix(a.Mimetype, "text/html") {
+  //   return a, nil
+  // }
+
+  if err := a.SetContentDataWriteFunc(AssetContentDataWriteHtml); err != nil {
+    return nil, err
+  }
+
+  if a.HasContentData() || a.HasContentDataReadFunc() {
     return a, nil
   }
 
   if err := a.SetContentDataReadFunc(AssetContentDataReadHtml); err != nil {
-    return nil, err
-  }
-
-  if err := a.SetContentDataWriteFunc(AssetContentDataWriteHtml); err != nil {
     return nil, err
   }
 
@@ -117,17 +133,11 @@ func TaskMapContentDataHtmlHandlers (a *Asset) (*Asset, error) {
   them to 
 */
 func TaskMapApplyPathTransformationsToHtmlContent (a *Asset) (*Asset, error) {
-  if ! strings.HasPrefix(a.Mimetype, "text/html") {
-    return a, nil
+  var err error
+
+  if a, err = TaskMapContentDataHtmlHandlers(a); err != nil {
+    return nil, err
   }
-
-  /*
-    TODO: consider that if the asset does not have HTML handlers, invoke TaskMapContentDataHtmlHandlers as a default
-
-    This type of design has a couple of trade-offs. If a task
-    which assigns ContentData handlers was not ran within the
-    task queue, it allows the data to actually be parsed. 
-  */
 
   doc_any, err := a.GetContentData()
   if err != nil { return nil, err }

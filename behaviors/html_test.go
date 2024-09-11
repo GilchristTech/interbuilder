@@ -15,6 +15,7 @@ func TestHtmlPipeline (t *testing.T) {
   spec := root.AddSubspec(NewSpec("spec", nil))
   var source_dir = t.TempDir()
   var output_dir = t.TempDir()
+  root.Props["quiet"]      = true
   root.Props["source_dir"] = output_dir
   spec.Props["source_dir"] = source_dir
 
@@ -23,6 +24,7 @@ func TestHtmlPipeline (t *testing.T) {
   path_transformations, err := PathTransformationsFromAny("s`^/?`transformed/`")
   if err != nil { t.Fatal(err) }
   spec.PathTransformations = path_transformations
+
 
   // Produce an HTML asset and pass it
   //
@@ -71,8 +73,7 @@ func TestHtmlPipeline (t *testing.T) {
   // Assign HTML ContentData handlers and transform links in HTML
   // based on path transformations
   //
-  spec.EnqueueTaskMapFunc("html-loader", TaskMapContentDataHtmlHandlers)
-  spec.EnqueueTaskMapFunc("html-transform", TaskMapApplyPathTransformationsToHtmlContent)
+  spec.EnqueueTask( TaskResolverApplyPathTransformationsToHtmlContent.NewTask() )
 
   // Consume assets
   //

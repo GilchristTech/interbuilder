@@ -806,6 +806,20 @@ func (a *Asset) GetContentDataWriteFunc () (func (*Asset, io.Writer, any)(int, e
 }
 
 
+func (a *Asset) HasContentData () bool {
+  return a.ContentData != nil
+}
+
+func (a *Asset) HasContentDataReadFunc () bool {
+  return a.content_data_read_func != nil
+}
+
+
+func (a *Asset) HasContentDataWriteFunc () bool {
+  return a.content_data_write_func != nil
+}
+
+
 /*
   ReadDataTo reads data from the parameter using the Asset's data
   reader. This does read or write from any internal data cache

@@ -43,6 +43,15 @@ type Task struct {
   MapFunc    TaskMapFunc
 
   CancelChan chan bool
+
+  /*
+    Asset matching: used in conjunction with a MapFunc, the
+    matching operands below are used to evaluate whether a given
+    asset can be received by the MapFunc, or passed to the next
+    Task.
+  */
+  MatchFunc       func (*Task, *Asset) (bool, error)
+  MatchMimePrefix string
 }
 
 
@@ -363,6 +372,8 @@ func (s *Spec) EnqueueTask (t *Task) *Task {
   s.task_queue_lock.Lock()
   defer s.task_queue_lock.Unlock()
 
+  t.Spec = s
+
   end := t.End()
 
   if s.Tasks == nil {
@@ -415,6 +426,7 @@ func (s *Spec) DeferTask (t *Task) *Task {
   defer s.task_queue_lock.Unlock()
 
   end := t.End()
+  t.Spec = s
 
   // If the spec tasks list is not yet defined, enqueued tasks
   // should still be executed before deferred tasks, so define
@@ -458,6 +470,7 @@ func (s *Spec) DeferTaskFunc (name string, f TaskFunc) *Task {
 */
 func (s *Spec) PushTask (t *Task) *Task {
   end := t.End()
+  t.Spec = s
 
   if s.tasks_push_queue == nil || s.tasks_push_end == nil {
     s.tasks_push_queue = t
@@ -584,7 +597,7 @@ func (s *Spec) flushTaskPushQueue () *Task {
 */
 func (tk *Task) PassSingularAsset (a *Asset) error {
   if ! a.IsSingle() {
-    return fmt.Errorf("Cannot pass, asset is not singular")
+    return fmt.Errorf("Cannot pass from task %s, asset is not singular", tk.Name)
   }
 
   var asset *Asset = a
@@ -595,27 +608,43 @@ func (tk *Task) PassSingularAsset (a *Asset) error {
   //
   if tk.Next == nil {
     if tk.Spec != nil {
-      return tk.Spec.EmitAsset(a)
+      if err := tk.Spec.EmitAsset(a); err != nil {
+        return fmt.Errorf("Error in task %s emitting asset: %w", tk.Name, err)
+      }
     }
     return nil
   }
 
-  // There is a task after this one. If it has no MapFunc, this
-  // asset reference is valid and that task its destination,
-  // because the Func or Spec may need to operate with the Task's
-  // Asset buffer.
+  // There is a task after this one.
+  var next *Task = tk.Next
+
+  // Check the next Task's asset filters. If this asset does not
+  // match the next task, then let the next task pass this asset
+  // without handling it.
   //
-  if tk.Next.MapFunc == nil {
-    tk.Next.AddAsset(asset)
+  if matches, err := next.MatchAsset(asset); err != nil {
+    return err
+  } else if matches == false {
+    return next.PassSingularAsset(asset)
+  }
+
+  // This asset matches in the next task.
+
+  // If the next task has no MapFunc, deposit it into that task's
+  // Asset buffer and exit.
+  //
+  if next.MapFunc == nil {
+    next.AddAsset(asset)
     return nil
   }
 
-  // There is a next task, and it has a MapFunc. Replace the
-  // asset with a new reference.
+  // This asset matches the next task, and that task has a
+  // MapFunc. Apply the map function and replace the asset with a
+  // new reference.
   //
-  asset, err = tk.Next.MapFunc(asset)
+  asset, err = next.MapFunc(asset)
   if err != nil {
-    return fmt.Errorf("Error in task %s: %w", tk.Next.Name, err)
+    return fmt.Errorf("Error in task %s MapFunc: %w", next.Name, err)
   }
   if asset == nil { return nil }
 
@@ -623,18 +652,18 @@ func (tk *Task) PassSingularAsset (a *Asset) error {
   // the destination, since the Func may mutate the asset via its
   // task buffer.
   //
-  if tk.Next.Func != nil {
-    tk.Next.AddAsset(asset)
+  if next.Func != nil {
+    next.AddAsset(asset)
     return nil
   }
 
   // There is a next task, we have a valid (map-function-applied)
   // asset for it, and this task has no Func to mutate the asset
-  // further.  Recurse, sending the asset as far as it can go in
+  // further. Recurse, sending the asset as far as it can go in
   // the Task without requiring the task queue to synchronize up
   // until that point.
   //
-  return tk.Next.PassSingularAsset(asset)
+  return next.PassSingularAsset(asset)
 }
 
 
@@ -647,4 +676,28 @@ func (tk *Task) AddAsset (a *Asset) *Asset {
     tk.Assets = append(tk.Assets, a)
   }
   return a
+}
+
+
+/*
+  MatchAsset compares an asset with multiple matching operands,
+  defined inside the Task. If any defined matching operands do
+  not evaluate to true, the function returns false. If all
+  defined matching operands are true, or if none are defined,
+  this function returns true.
+*/
+func (tk *Task) MatchAsset (a *Asset) (bool, error) {
+  if tk.MatchMimePrefix != "" && !strings.HasPrefix(a.Mimetype, tk.MatchMimePrefix) {
+    return false, nil
+  }
+
+  if tk.MatchFunc != nil {
+    if is_match, err := tk.MatchFunc(tk, a); err != nil {
+      return false, err
+    } else if is_match == false {
+      return false, nil
+    }
+  }
+
+  return true, nil
 }
