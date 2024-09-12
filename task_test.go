@@ -7,6 +7,7 @@ import (
   "os"
   "path/filepath"
   "sort"
+  "net/url"
 )
 
 
@@ -415,5 +416,60 @@ func TestTaskPassAsset (t *testing.T) {
         t.Fatalf("Test case #%d was expected to error, but did not", test_case_i)
       }
     }
+  }
+}
+
+
+func TestTaskResolverMatchWithAsset (t *testing.T) {
+  var task_resolver_txt_specific = & TaskResolver {
+    Id: "task-resolver-specific",
+    Name: "test-resolver",
+    TaskPrototype: Task {
+      MatchMimePrefix: "text/plain",
+      MatchFunc: func (tk *Task, a *Asset) (bool, error) {
+        if a.Url == nil {
+          return false, fmt.Errorf("Asset does not have a defined URL")
+        }
+        var url_key string = a.Url.Path
+        return strings.Contains(url_key, "specific"), nil
+      },
+    },
+  }
+
+  var task_resolver_txt = & TaskResolver {
+    Id: "test-resolver-root",
+    Name: "test-resolver",
+    Children: task_resolver_txt_specific,
+    TaskPrototype: Task {
+      MatchMimePrefix: "text/plain",
+    },
+  }
+
+  base_url, _ := url.Parse("ib://test")
+
+  var asset_file_txt = & Asset {
+    Url:      base_url.JoinPath("file.txt"),
+    Mimetype: "text/plain",
+  }
+
+  var asset_specific_file_txt = & Asset {
+    Url:      base_url.JoinPath("specific-file.txt"),
+    Mimetype: "text/plain",
+  }
+
+  if resolver_match, err := task_resolver_txt.MatchWithAsset(asset_file_txt); err != nil {
+    t.Fatal(err)
+  } else if got := resolver_match; got == nil {
+    t.Fatalf("Task resolver is nil")
+  } else if expect := task_resolver_txt; got != expect {
+    t.Fatalf("Expected task resolver with ID %s, got %s", expect.Id, got.Id)
+  }
+
+  if resolver_match, err := task_resolver_txt.MatchWithAsset(asset_specific_file_txt); err != nil {
+    t.Fatal(err)
+  } else if got := resolver_match; got == nil {
+    t.Fatalf("Task resolver is nil")
+  } else if expect := task_resolver_txt_specific; got != expect {
+    t.Fatalf("Expected task resolver with ID %s, got %s", expect.Id, got.Id)
   }
 }

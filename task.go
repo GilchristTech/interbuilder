@@ -701,3 +701,47 @@ func (tk *Task) MatchAsset (a *Asset) (bool, error) {
 
   return true, nil
 }
+
+
+/*
+  Match a TaskResolver using an asset, comparing it with the this
+  resolver's task prototype, and those of this resolver's
+  children. Find the deepest-ish matching TaskResolver.
+*/
+func (tr *TaskResolver) MatchWithAsset (a *Asset) (*TaskResolver, error) {
+  // Check this resolver's TaskPrototype for a match.
+  // Guard against a non-match without checking children.
+  //
+  if this_matches, err := tr.TaskPrototype.MatchAsset(a); err != nil {
+    return nil, err
+  } else if this_matches == false {
+    return nil, nil
+  }
+  
+  // This resolver, tr, matches.
+  // Check children for matches, which take precedence
+  //
+  child_match, err := tr.MatchChildrenWithAsset(a)
+  if err != nil {
+    return nil, nil
+  } else if child_match != nil {
+    return child_match, err
+  }
+
+  // No children match, but this resolver does.
+  // Return this resolver.
+  //
+  return tr, nil
+}
+
+
+func (tr *TaskResolver) MatchChildrenWithAsset (a *Asset) (*TaskResolver, error) {
+  for child := tr.Children; child != nil; child = child.Next {
+    if child_match, err := child.MatchWithAsset(a); err != nil {
+      return nil, err
+    } else if child_match != nil {
+      return child_match, nil
+    }
+  }
+  return nil, nil
+}
