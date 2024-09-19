@@ -204,10 +204,10 @@ func (s *Spec) Run () error {
     go func () {
       err := subspec.Run()
       if err != nil {
-        cancel_task_chan <- true
         error_chan <- fmt.Errorf(
           "Error in subspec \"%s\": %w", subspec.Name, err,
         )
+        cancel_task_chan <- true
       }
     }()
   }
@@ -310,22 +310,31 @@ func (s *Spec) Run () error {
   // below to finish.
   //
   CONSUME_INPUT_AND_ERRORS:
-  for { select {
-    case err, ok := <-error_chan:
-      if !ok {
-        break CONSUME_INPUT_AND_ERRORS
-      }
-
-      s.Println("ERROR signal:", err)
+  for {
+    select {
+    case err := <-error_chan:
+      s.Println(err)
       return err
-    case asset, ok := <- s.Input:
-      if !ok {
+
+    case asset, ok := <-s.Input:
+      if ok == false {
+        // Subspecs may have finished executing, but they may
+        // still be sending an error. Wait a tiny bit before
+        // closing the error channel.
+        //
+        time.Sleep(5 * time.Millisecond)
+        close(error_chan)
         break CONSUME_INPUT_AND_ERRORS
       }
       if err := s.EmitAsset(asset); err != nil {
         return err
       }
-  }}
+    }
+  }
+  
+  if err := <- error_chan; err != nil {
+    return err
+  }
 
   return nil
 }
