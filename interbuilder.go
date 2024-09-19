@@ -184,13 +184,19 @@ func (s *Spec) Println (a ...any) (n int, err error) {
 
 
 func (s *Spec) Run () error {
-  // TODO: print message verbosity settings; these should not print during tests
   s.Printf("[%s] Running\n", s.Name)
   defer s.Printf("[%s] Exit\n", s.Name)
   defer s.Done()
 
-  var error_chan       = make(chan error)
-  var cancel_task_chan = make(chan bool)
+  var num_subspecs = len(s.Subspecs)
+
+  // Error and cancel channels. These are buffered with the
+  // number of subspecs, because sending to an unbuffered channel
+  // blocks, which can prevent the goroutines of subspecs from
+  // exiting if they are trying to send an error.
+  //
+  var error_chan       = make(chan error, num_subspecs)
+  var cancel_task_chan = make(chan bool,  num_subspecs)
 
   // Run subspecs in parallel goroutines
   //
@@ -198,8 +204,10 @@ func (s *Spec) Run () error {
     go func () {
       err := subspec.Run()
       if err != nil {
-        error_chan <- fmt.Errorf("Error in subspec \"%s\": %w", subspec.Name, err)
         cancel_task_chan <- true
+        error_chan <- fmt.Errorf(
+          "Error in subspec \"%s\": %w", subspec.Name, err,
+        )
       }
     }()
   }
@@ -227,6 +235,7 @@ func (s *Spec) Run () error {
     default:
       // pass
     case <-cancel_task_chan:
+      // TODO: instead of cancelling the task loop, perhaps this should skip to deferred tasks to allow cleanup tasks.
       break TASK_LOOP
     }
 
@@ -247,7 +256,7 @@ func (s *Spec) Run () error {
       return err
     }
 
-    // Run the task
+    // Run the Task Func
     //
     if task.ResolverId == "" {
       s.Printf("[%s] task: %s\n", s.Name, task.Name)
@@ -272,6 +281,7 @@ func (s *Spec) Run () error {
     }
 
     task.CancelChan = nil
+    task.Assets     = nil // Let un-emitted assets get freed
 
     // Flush the push queue and advance to the next task. Merge
     // the internal asset buffer into the next task.
@@ -285,36 +295,37 @@ func (s *Spec) Run () error {
     s.task_queue_lock.Unlock()
   }
 
-  // Now that the task loop has closed, receive an error from
-  // subspecs, if applicable
+  // Consume remaining input assets and subspec errors:
+  // there are no tasks left, but there may be Input channel
+  // assets remaining, or subspecs may have emitted errors. 
   //
-  select {
-  case err := <-error_chan:
-    return err
-  default:
-    // pass
-  }
-
-  // Emit any remaining assets
+  // The execution of this loop is implicitly tied to the
+  // execution of subspecs; subspecs have their parents as output
+  // WaitGroups, and their completion progresses the WaitGroup
+  // this parent spec uses. When a subspec of this Spec finishes
+  // (and calls Done()), this spec's WaitGroup is de-incremented.
+  // Meanwhile, this Spec's Run method has spawned a goroutine to
+  // close the Input channel once the InputGroup WaitGroup is
+  // Done, in turn causing the asset consumption in the loop
+  // below to finish.
   //
-  for asset := range s.Input {
-    err := s.EmitAsset(asset)
-    if err != nil { return err }
-  }
+  CONSUME_INPUT_AND_ERRORS:
+  for { select {
+    case err, ok := <-error_chan:
+      if !ok {
+        break CONSUME_INPUT_AND_ERRORS
+      }
 
-  var internal_asset_chunk *Asset
-
-  if internal_asset_chunk != nil {
-    if err := s.EmitAsset(internal_asset_chunk); err != nil {
+      s.Println("ERROR signal:", err)
       return err
-    }
-  }
-
-  // For the above range to finish, s.Input must be closed. This
-  // function runs a goroutine which waits for the subspecs to
-  // finish executing before closing the input channel, which
-  // means that for execution to get to this point,
-  // s.InputGroup.Wait() has been called and finished.
+    case asset, ok := <- s.Input:
+      if !ok {
+        break CONSUME_INPUT_AND_ERRORS
+      }
+      if err := s.EmitAsset(asset); err != nil {
+        return err
+      }
+  }}
 
   return nil
 }
