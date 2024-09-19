@@ -279,7 +279,7 @@ func TestTaskCommand (t *testing.T) {
 }
 
 
-func TestTaskPassAsset (t *testing.T) {
+func TestTaskEmitAsset (t *testing.T) {
   /*
     These strings encode definitions of simple task queues, each
     a test case. Each character represents another Task. All
@@ -289,9 +289,6 @@ func TestTaskPassAsset (t *testing.T) {
       1: No MapFunc,    Func
       2:    MapFunc, no Func
       3:    MapFunc,    Func
-
-    Each task queue is given a task which produces an asset with
-    a 
   */
   var test_cases = []struct {
     Tasks     string
@@ -318,7 +315,7 @@ func TestTaskPassAsset (t *testing.T) {
 
       for _, asset := range assets {
         asset.ContentBytes = append(asset.ContentBytes, 0)
-        tk.PassSingularAsset(asset)
+        tk.EmitAsset(asset)
       }
     }
 
@@ -381,7 +378,7 @@ func TestTaskPassAsset (t *testing.T) {
     spec.PushTaskFunc("produce", func (s *Spec, tk *Task) error {
       asset := s.MakeAsset("asset.txt")
       asset.SetContentBytes([]byte{ 0 })
-      tk.PassSingularAsset(asset)
+      tk.EmitAsset(asset)
       return nil
     })
 
@@ -414,6 +411,184 @@ func TestTaskPassAsset (t *testing.T) {
     } else {
       if test_case.WillError {
         t.Fatalf("Test case #%d was expected to error, but did not", test_case_i)
+      }
+    }
+  }
+}
+
+
+func TestTaskEmitMultiAsset (t *testing.T) {
+  var resolver_produce_asset_single = TaskResolver {
+    Name: "produce-asset-singular",
+    TaskPrototype: Task {
+      AcceptMultiAssets: true,
+      Func: func (s *Spec, tk *Task) error {
+        tk.PoolSpecInputAssets()
+
+        if err := tk.ForwardAssets(); err != nil {
+          return fmt.Errorf("Error forwarding assets: %w", err)
+        }
+
+        asset := s.MakeAsset("single")
+
+        if err := tk.EmitAsset(asset); err != nil {
+          return fmt.Errorf("Error emitting new single asset: %w", err)
+        }
+
+        return nil
+      },
+    },
+  }
+
+  var resolver_produce_asset_multi = TaskResolver {
+    Name: "produce-asset-multi",
+    TaskPrototype: Task {
+      Func: func (s *Spec, tk *Task) error {
+        if err := tk.ForwardAssets(); err != nil {
+          return fmt.Errorf("Error forwarding assets: %w", err)
+        }
+
+        // Produce and emit a multi-asset with ten assets.
+        //
+        asset := s.MakeAsset("multi")
+        asset.SetAssetArray([]*Asset {
+          s.MakeAsset("single"), s.MakeAsset("single"), s.MakeAsset("single"),
+          s.MakeAsset("single"), s.MakeAsset("single"), s.MakeAsset("single"),
+          s.MakeAsset("single"), s.MakeAsset("single"), s.MakeAsset("single"),
+          s.MakeAsset("single"),
+        })
+
+        if err := tk.EmitAsset(asset); err != nil {
+          return fmt.Errorf("Error emitting new single asset: %w", err)
+        }
+
+        return nil
+      },
+    },
+  }
+
+  // All tasks which map assets will use the
+  // same mapping function
+  //
+  var task_map_func = func (a *Asset) (*Asset, error) {
+    return a, nil
+  }
+
+  // Use TaskResolvers as task factories to test
+  // different task sequences.
+  //
+  var resolver_map_multi = TaskResolver {
+    Name: "map-accept-multi",
+    TaskPrototype: Task {
+      MapFunc:           task_map_func,
+      AcceptMultiAssets: true,
+    },
+  }
+
+  var resolver_map_flatten = TaskResolver {
+    Name: "map-flatten",
+    TaskPrototype: Task {
+      MapFunc: task_map_func,
+    },
+  }
+
+  var resolver_map_reject_multi = TaskResolver {
+    Name: "map-reject-multi",
+    TaskPrototype: Task {
+      Name:                     "map-reject-multi",
+      MapFunc:                  task_map_func,
+      AcceptMultiAssets:        false,
+      RejectFlattenMultiAssets: true,
+    },
+  }
+
+  var test_cases = []struct {
+    Tasks             []*TaskResolver;
+    ExpectError       bool;
+    NumSingularAssets int;
+  }{
+
+    { NumSingularAssets: 10,
+      Tasks: []*TaskResolver { &resolver_produce_asset_multi },
+    },
+
+    { NumSingularAssets: 12,
+      Tasks: []*TaskResolver {
+        & resolver_produce_asset_single,
+        & resolver_produce_asset_multi,
+        & resolver_produce_asset_single,
+      },
+    },
+
+    { ExpectError: true,
+      Tasks: []*TaskResolver {
+        & resolver_produce_asset_multi,
+        & resolver_map_reject_multi,
+      },
+    },
+
+    { NumSingularAssets: 11,
+      Tasks: []*TaskResolver {
+        & resolver_produce_asset_single,
+        & resolver_produce_asset_multi,
+        & resolver_map_flatten,
+      },
+    },
+
+    { NumSingularAssets: 11,
+      Tasks: []*TaskResolver {
+        & resolver_produce_asset_single,
+        & resolver_produce_asset_multi,
+        & resolver_map_flatten,
+        & resolver_map_reject_multi,
+      },
+    },
+
+    { NumSingularAssets: 21,
+      Tasks: []*TaskResolver {
+        & resolver_produce_asset_single,
+        & resolver_produce_asset_multi,
+        & resolver_produce_asset_multi,
+        & resolver_map_multi,
+      },
+    },
+  }
+
+
+  for test_case_i, test_case := range test_cases {
+    var root = NewSpec("root", nil)
+    var spec = root.AddSubspec(NewSpec("spec", nil))
+
+    // Generate the task queue
+    //
+    for _, task_resolver := range test_case.Tasks {
+      spec.EnqueueTask(task_resolver.NewTask())
+    }
+
+    // Consume spec output and assert the test case's conditions
+    //
+    root.EnqueueTaskFunc("consume-assert", func (s *Spec, tk *Task) error {
+      if err := tk.PoolSpecInputAssets(); err != nil {
+        return err
+      }
+
+      if got, expect := len(tk.Assets), test_case.NumSingularAssets; got != expect {
+        t.Errorf(
+          "Test case %d expected %d singular assets total, got %d",
+          test_case_i, expect, got,
+        )
+      }
+
+      return nil
+    })
+
+    if err := root.Run(); (err != nil) != test_case.ExpectError {
+      t.Log(SprintSpec(root))
+      t.Log(err)
+      if test_case.ExpectError {
+        t.Errorf("Test case %d expected an error, but no error was returned", test_case_i)
+      } else {
+        t.Errorf("Test case %d exited with an error: %v", test_case_i, err)
       }
     }
   }

@@ -51,6 +51,25 @@ func TestSpecDeferTaskIsNotCircular (t *testing.T) {
 }
 
 
+func TestSpecRunDetectsCircularTask (t *testing.T) {
+  var spec = NewSpec("test", nil)
+  spec.Props["quiet"] = true
+
+  var task_func = func (s *Spec, tk *Task) error {
+    return nil
+  }
+
+  task_1 := spec.EnqueueTaskFunc("circular-1", task_func)
+  task_2 := spec.EnqueueTaskFunc("circular-2", task_func)
+
+  task_2.Next = task_1  // never do this
+
+  if err := spec.Run(); err == nil {
+    t.Fatal("Expected Spec to error when encountering a circular task list", err)
+  }
+}
+
+
 func TestSpecEmptySingularRunFinishes (t *testing.T) {
   spec := NewSpec("single", nil)
   spec.Props["quiet"] = true
@@ -327,7 +346,7 @@ func TestTaskPassAssetsToSpec (t *testing.T) {
       asset.SetContentBytes(
         []byte( fmt.Sprintf("content %d", i) ),
       )
-      tk.PassSingularAsset(asset)
+      tk.EmitAsset(asset)
       tk.Println(asset.Url)
     }
     return nil
@@ -421,7 +440,7 @@ func TestTaskMapFuncPathTransformPipeline (t *testing.T) {
     eventually_mutated_asset, err := s.MakeFileKeyAsset("asset.txt")
     if err != nil { return err }
 
-    if err := tk.PassSingularAsset(eventually_mutated_asset); err != nil {
+    if err := tk.EmitAsset(eventually_mutated_asset); err != nil {
       return err
     }
 
@@ -442,7 +461,7 @@ func TestTaskMapFuncPathTransformPipeline (t *testing.T) {
     control_asset, err := s.MakeFileKeyAsset("control.bin")
     if err != nil { return err }
 
-    if err := tk.PassSingularAsset(control_asset); err != nil {
+    if err := tk.EmitAsset(control_asset); err != nil {
       return err
     }
 

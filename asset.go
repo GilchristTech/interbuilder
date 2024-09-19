@@ -244,15 +244,18 @@ func (s *Spec) WriteFile (key string, data []byte, perm fs.FileMode) error {
 
 
 func (s *Spec) EmitAsset (a *Asset) error {
-
   if a.Url == nil {
-    return fmt.Errorf("Cannot emit asset with a nil URL")
+    return fmt.Errorf("Cannot emit a singular asset with a nil URL")
   }
 
   var modified       bool = false
   var url_path     string = a.Url.Path
   var url_prefix   string = ""
   var suffix_path  string = ""
+
+  // TODO: get asset directive
+  // TODO: what to do with @source???
+  // TODO: if sans-directive, use @emit
 
   if strings.HasPrefix(url_path, "/@emit/") {
     url_prefix  = url_path[:len("/@emit/")]
@@ -280,7 +283,8 @@ func (s *Spec) EmitAsset (a *Asset) error {
     }
   }
 
-  // If the asset was modified, make a shallow copy
+  // If the asset was modified, make a shallow copy, because
+  // there may be multiple assets.
   //
   if modified {
     copied     := *a

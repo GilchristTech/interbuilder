@@ -18,7 +18,7 @@ type TaskResolver struct {
   Url           url.URL
   Id            string
   MatchFunc     TaskMatchFunc
-  TaskPrototype Task
+  TaskPrototype Task  // TODO: consider renaming. TaskTemplate, perhaps? Also consider making private.
 
   Spec          *Spec
   History       HistoryEntry
@@ -28,6 +28,14 @@ type TaskResolver struct {
 }
 
 
+/*
+  Tasks are the operational units of Interbuilder. Specs maintain
+  a queue of these tasks, which run system commands and
+  manipulate Assets. Tasks act as a singly-linked list of callback
+  functions (a Spec's Task queue), which also move Assets forward
+  in the list. There are two types of callback functions, which
+  are fields in the Task struct: Func and MapFunc.
+*/
 type Task struct {
   Spec       *Spec
   ResolverId string
@@ -39,7 +47,20 @@ type Task struct {
 
   Assets     []*Asset
 
+  // Func task callback functions only run when this task is
+  // reached in the Task queue. It can access its internal Assets
+  // array in a current, complete state, and can modify the
+  // future elements of the Task queue in a thread-safe way. Func
+  // Task callbacks are the serial execution mechanism of a
+  // Spec's Task queue.
+  //
   Func       TaskFunc
+  
+  // MapFunc task callback functions are ran over every Asset
+  // emitted to this Task, and can be executed as part of the
+  // emitting algorithm before a task is reached within the Task
+  // queue.
+  //
   MapFunc    TaskMapFunc
 
   CancelChan chan bool
@@ -52,6 +73,23 @@ type Task struct {
   */
   MatchFunc       func (*Task, *Asset) (bool, error)
   MatchMimePrefix string
+
+  /*
+    Asset quantity handling: Assets are capable of representing
+    either a single Asset, or act like a promise to expand into
+    more Assets. Because tasks can filter what 
+  */
+
+  // When receiving a multi-asset, by default, if a Task does not
+  // accept them, it should flatten the asset. However, a Task
+  // can turn this behavior off with the RejectFlattenMultiAssets.
+  //
+  RejectFlattenMultiAssets bool
+
+  // AcceptMultiAssets allows a Task to receive multi-assets the
+  // same way it would receive singular assets.
+  //
+  AcceptMultiAssets bool
 }
 
 
@@ -243,34 +281,12 @@ func (t *Task) CommandRun (name string, args ...string) (*exec.Cmd, error) {
 
 
 func (tk *Task) Run (s *Spec) error {
-  // If this task has an asset map function, apply it to the
-  // asset buffer.
-  //
-  if tk.MapFunc != nil {
-    tk.Started = true
-    mapped_assets := make([]*Asset, 0, len(tk.Assets))
-    for _, asset := range tk.Assets {
-      mapped_asset, err := tk.MapFunc(asset)
-
-      if err != nil {
-        return fmt.Errorf("Error while mapping assets in task: %w", err)
-      }
-
-      if mapped_asset != nil {
-        mapped_assets = append(mapped_assets, asset)
-      }
-    }
-    tk.Assets = mapped_assets
-
-    if tk.Func != nil {
-      return tk.Func(s, tk)
-    }
-
-    return nil
+  if tk.MapFunc == nil && tk.Func == nil {
+    return fmt.Errorf("Both Task.Func and Task.MapFunc are nil")
   }
 
   if tk.Func == nil {
-    return fmt.Errorf("Both Task.Func and Task.MapFunc are nil")
+    return nil
   }
 
   tk.Started = true
@@ -280,7 +296,7 @@ func (tk *Task) Run (s *Spec) error {
 
 /*
   Searches this Spec, and recursively through its parents, for a
-  TaskResolver with a specific ID. Returns nil if none is found
+  TaskResolver with a specific ID. Returns nil if none is found.
 */
 func (s *Spec) GetTaskResolverById (id string) *TaskResolver {
   for tr := s.TaskResolvers ; tr != nil ; tr = tr.Next {
@@ -593,13 +609,15 @@ func (s *Spec) flushTaskPushQueue () *Task {
 
 
 /*
-  PassSingularAsset sends an asset to
+  PassAsset sends an Asset to subsequent assets. As long
+  as there are Tasks with only MapFuncs, the asset will have
+  those map function applied, and Tasks with normal Funcs will
+  have the asset deposited into their asset array and block the
+  passing until that Task is reached in the Spec's Task queue. If
+  an Asset makes it all the way through the Task queue, it is
+  emitted.
 */
-func (tk *Task) PassSingularAsset (a *Asset) error {
-  if ! a.IsSingle() {
-    return fmt.Errorf("Cannot pass from task %s, asset is not singular", tk.Name)
-  }
-
+func (tk *Task) EmitAsset (a *Asset) error {
   var asset *Asset = a
   var err   error
 
@@ -618,6 +636,40 @@ func (tk *Task) PassSingularAsset (a *Asset) error {
   // There is a task after this one.
   var next *Task = tk.Next
 
+  // Handle pluralistic assets
+  //
+  if a.IsMulti() {
+
+    // This pluralistic asset can be handled the same way as a
+    // singular asset. Exit any special multi-asset handling.
+    //
+    if next.AcceptMultiAssets {
+      goto EXIT_IS_MULTI
+    }
+
+    // The next asset does not accept multi-assets, but it may
+    // allow for multi-assets to be flattened. If so, flatten;
+    // otherwise, error because a way of handling this
+    // multi-asset was not found.
+    //
+    if next.RejectFlattenMultiAssets == false {
+      if assets, err := a.Flatten(); err != nil {
+        return err
+      } else {
+        for _, asset := range assets {
+          if err := tk.EmitAsset(asset); err != nil {
+            return err
+          }
+        }
+      }
+      return nil
+    }
+
+    return fmt.Errorf("Cannot pass from task %s to %s, asset is not singular and the task cannot receive multi assets", tk.Name, next.Name)
+  }
+  EXIT_IS_MULTI:
+
+
   // Check the next Task's asset filters. If this asset does not
   // match the next task, then let the next task pass this asset
   // without handling it.
@@ -625,7 +677,7 @@ func (tk *Task) PassSingularAsset (a *Asset) error {
   if matches, err := next.MatchAsset(asset); err != nil {
     return err
   } else if matches == false {
-    return next.PassSingularAsset(asset)
+    return next.EmitAsset(asset)
   }
 
   // This asset matches in the next task.
@@ -663,13 +715,83 @@ func (tk *Task) PassSingularAsset (a *Asset) error {
   // the Task without requiring the task queue to synchronize up
   // until that point.
   //
-  return next.PassSingularAsset(asset)
+  return next.EmitAsset(asset)
+}
+
+
+/*
+  PoolSpecInputAssets reads the Spec input channel for asset
+  chunks and inserts them into the Task's Asset array. Note:
+  because this blocks until all input is received, it can be less
+  efficient than using a range over the Input channel.
+*/
+func (tk *Task) PoolSpecInputAssets () error {
+  if tk.Spec == nil {
+    return fmt.Errorf("Task Spec is nil")
+  }
+
+  for asset_chunk := range tk.Spec.Input {
+    if asset_chunk.IsSingle() || tk.AcceptMultiAssets {
+      tk.Assets = append(tk.Assets, asset_chunk)
+      continue
+    }
+
+    // This is a multi-asset, and this task does not accept
+    // multi-assets.
+
+    if ! tk.RejectFlattenMultiAssets {
+      if assets, err := asset_chunk.Flatten(); err != nil {
+        return err
+      } else {
+        tk.Assets = append(tk.Assets, assets...)
+      }
+      continue
+    }
+
+    return fmt.Errorf("This task does not have a way of receiving a multi-asset")
+  }
+
+  return nil
+}
+
+
+/*
+  ForwardAssets emits all assets from this Task's internal Assets
+  array into the next task or spec, returning an error if one
+  occurs.
+*/
+func (tk *Task) ForwardAssets () error {
+  if tk.Spec == nil {
+    return fmt.Errorf("Task Spec undefined")
+  }
+
+  // If a multi-asset can be used, create one with the Assets
+  // slice and emit it. This is likely more efficient than
+  // iterating Assets and emitting them individually.
+  //
+  if tk.Next == nil || tk.Next.AcceptMultiAssets {
+    asset := tk.Spec.MakeAsset("")
+    asset.SetAssetArray(tk.Assets)
+    return tk.EmitAsset(asset)
+  }
+
+  // There is a next task, it does not accept multi-assets.
+  // Emit all assets.
+  //
+  for _, asset := range tk.Assets {
+    if err := tk.EmitAsset(asset); err != nil {
+      return fmt.Errorf("Error while forwarding an asset: %w", err)
+    }
+  }
+
+  return nil
 }
 
 
 /*
   AddAsset adds an asset to the Task's internal asset buffer.
-  Returns the asset.
+  Returns the asset. This does not perform any validation of the
+  Asset or Task.
 */
 func (tk *Task) AddAsset (a *Asset) *Asset {
   if a != nil {
