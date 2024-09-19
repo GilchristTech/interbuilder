@@ -51,7 +51,7 @@ func TestHtmlPipeline (t *testing.T) {
 
     index_asset, err := s.MakeFileKeyAsset("index.html")
     if err != nil { return err }
-    err = tk.PassSingularAsset(index_asset)
+    err = tk.EmitAsset(index_asset)
     if err != nil { return err }
 
     // Write control TXT file
@@ -64,7 +64,7 @@ func TestHtmlPipeline (t *testing.T) {
 
     text_asset, err := s.MakeFileKeyAsset("file.txt")
     if err != nil { return err }
-    err = tk.PassSingularAsset(text_asset)
+    err = tk.EmitAsset(text_asset)
     if err != nil { return err }
 
     return nil
