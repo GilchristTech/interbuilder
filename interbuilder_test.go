@@ -408,9 +408,10 @@ func TestTaskPassAssetsToSpec (t *testing.T) {
 
 
 /*
-  Test a pipeline which uses inter-task asset passing, a content
-  data reader function, and applies a PathTransformation to
-  strings inside the string content of the assets.
+  Test a pipeline which emits Assets between tasks, uses a
+  content data reader function, applies a PathTransformation
+  to strings inside the string content of the assets, and write
+  the assets to disk.
 */
 func TestTaskMapFuncPathTransformPipeline (t *testing.T) {
   root := NewSpec("root", nil)

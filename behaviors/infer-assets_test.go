@@ -11,9 +11,6 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
   var root = NewSpec("root", nil)
   var spec = root.AddSubspec(NewSpec("spec", nil))
 
-  spec.Props["source_dir"] = t.TempDir()
-  root.Props["source_dir"] = t.TempDir()
-
   root.AddTaskResolver(& TaskResolverAssetsInferRoot)
   TaskResolverAssetsInferRoot.AddTaskResolver(& TaskResolverAssetsInferHtml)
   root.AddTaskResolver(& TaskResolverApplyPathTransformationsToHtmlContent)
@@ -27,10 +24,16 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
   // Produce assets
   //
   spec.EnqueueTaskFunc("produce-assets", func (s *Spec, tk *Task) error {
-    err := s.WriteFile("file.txt", []byte("unmodified/path"), 0o660)
-    if err != nil { return err }
+    asset_txt := s.MakeAsset("file.txt")
+    asset_txt.Mimetype = "text/plain"
+    asset_txt.SetContentBytes([]byte("unmodified/path"))
+    if err := tk.EmitAsset(asset_txt); err != nil {
+      return nil
+    }
 
-    s.WriteFile("index.html", []byte(`
+    asset_html := s.MakeAsset("index.html")
+    asset_html.Mimetype = "text/html"
+    asset_html.SetContentBytes([]byte(`
       <!DOCTYPE html>
       <html lang="en">
       <head>
@@ -42,12 +45,9 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
         <a href="page/">Relative link</a>
       </body>
       </html>
-    `), 0o660)
-    if err != nil { return err }
+    `))
 
-    asset, err := s.MakeFileKeyAsset("/")
-    if err != nil { return err }
-    return tk.EmitAsset(asset)
+    return tk.EmitAsset(asset_html)
   })
 
   // Enqueue assets-infer task

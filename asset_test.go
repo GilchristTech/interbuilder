@@ -306,7 +306,7 @@ func TestSpecPathExists (t *testing.T) {
 }
 
 
-func TestSpecMakeFileKeyAssetValidFile (t *testing.T) {
+func TestSpecMakeFileKeyAssetIsValidFile (t *testing.T) {
   var source_dir string = t.TempDir()
 
   root := NewSpec("root", nil)
@@ -389,7 +389,7 @@ func TestSpecMakeFileKeyAssetValidFile (t *testing.T) {
 }
 
 
-func TestSpecMakeFileKeyAssetValidDirectory (t *testing.T) {
+func TestSpecMakeFileKeyAssetIsValidDirectory (t *testing.T) {
   var source_dir string = t.TempDir()
 
   root := NewSpec("root", nil)
