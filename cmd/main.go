@@ -26,10 +26,14 @@ func MakeDefaultRootSpec () *Spec {
   root.AddSpecResolver(behaviors.ResolveTaskSourceGitClone)
   root.AddSpecResolver(behaviors.ResolveTasksNodeJS)
 
+  // Asset content inference
+  //
+  root.AddTaskResolver(& behaviors.TaskResolverAssetsInferRoot)
+  behaviors.TaskResolverAssetsInferRoot.AddTaskResolver(& behaviors.TaskResolverAssetsInferHtml)
+  root.AddTaskResolver(& behaviors.TaskResolverApplyPathTransformationsToHtmlContent)
+
   // Asset processing layer
   //
-  // root.AddSpecResolver(behaviors.ResolveTransformPathsAssetContentHtml)
-  // root.AddSpecResolver(behaviors.ResolveTransform)
   root.DeferTaskFunc("root-consume", behaviors.TaskConsumeLinkFiles)
 
   // Subspec layer
@@ -37,36 +41,6 @@ func MakeDefaultRootSpec () *Spec {
   root.AddSpecResolver(behaviors.ResolveSubspecs)
 
   return root
-}
-
-
-func mainRunSpecJsonFile (spec_file string) (status int, err error) {
-  root := MakeDefaultRootSpec()
-
-  // Load spec configuration from file
-  //
-  specs_bytes, err := os.ReadFile(spec_file)
-  if err != nil {
-    return 1, fmt.Errorf("Could not read spec file: %w", err)
-  }
-
-  if err := json.Unmarshal(specs_bytes, &root.Props); err != nil {
-    return 1, fmt.Errorf("Could not parse spec json file: %w", err)
-  }
-
-  // Resolve
-  //
-  if err = root.Resolve() ; err != nil {
-    return 1, fmt.Errorf("Error while resolving build specs: %w", err)
-  }
-
-  // Run tasks
-  //
-  if err = root.Run() ; err != nil {
-    return 1, fmt.Errorf("Error while running build specs: %w", err)
-  }
-
-  return 0, nil
 }
 
 
@@ -83,11 +57,39 @@ var cmd_run = & cobra.Command {
   Short: "Run from a build specification file",
   Args: cobra.ExactArgs(1),
   Run: func (cmd *cobra.Command, args []string) {
-    status, err := mainRunSpecJsonFile(args[0])
-    if err != nil {
-      fmt.Println(err)
+    var root       *Spec = MakeDefaultRootSpec()
+    var spec_file string = args[0]
+
+    if print_spec {
+      defer PrintSpec(root)
     }
-    os.Exit(status)
+
+    // Load spec configuration from file
+    //
+    specs_bytes, err := os.ReadFile(spec_file)
+    if err != nil {
+      fmt.Println("Could not read spec file: %w\n", err)
+      os.Exit(1)
+    }
+
+    if err := json.Unmarshal(specs_bytes, &root.Props); err != nil {
+      fmt.Printf("Could not parse spec json file: %v\n", err)
+      os.Exit(1)
+    }
+
+    // Resolve
+    //
+    if err = root.Resolve() ; err != nil {
+      fmt.Printf("Error while resolving build specs: %v\n", err)
+      os.Exit(1)
+    }
+
+    // Run tasks
+    //
+    if err = root.Run() ; err != nil {
+      fmt.Printf("Error while running build specs: %v\n", err)
+      os.Exit(1)
+    }
   },
 }
 
