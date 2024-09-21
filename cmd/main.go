@@ -4,6 +4,8 @@ import (
   . "gilchrist.tech/interbuilder"
   "gilchrist.tech/interbuilder/behaviors"
 
+  "github.com/spf13/cobra"
+
   "fmt"
   "os"
   "encoding/json"
@@ -20,7 +22,7 @@ func MakeDefaultRootSpec () *Spec {
 
   // Source code inference layer
   //
-  root.AddSpecResolver(behaviors.ResolveTaskInferSource)
+  root.AddSpecResolver(behaviors.ResolveTaskInferSource) // TODO: rename to match TaskAssetsInfer?
   root.AddSpecResolver(behaviors.ResolveTaskSourceGitClone)
   root.AddSpecResolver(behaviors.ResolveTasksNodeJS)
 
@@ -38,13 +40,7 @@ func MakeDefaultRootSpec () *Spec {
 }
 
 
-func mainRunSpecJsonFile (args []string) (status int, err error) {
-  if num_args, expected_num_args := len(args), 1; num_args != expected_num_args {
-    return 1, fmt.Errorf("Expected %d args, got %d", expected_num_args, num_args)
-  }
-
-  spec_file := args[0]
-
+func mainRunSpecJsonFile (spec_file string) (status int, err error) {
   root := MakeDefaultRootSpec()
 
   // Load spec configuration from file
@@ -74,12 +70,37 @@ func mainRunSpecJsonFile (args []string) (status int, err error) {
 }
 
 
-func main () {
-  args := os.Args[1:]
+var cmd_root = & cobra.Command {
+  Use: "interbuilder",
+  Short: "Declarative Build Pipelining",
+}
 
-  status, err := mainRunSpecJsonFile(args)
-  if err != nil {
+
+var print_spec bool
+
+var cmd_run = & cobra.Command {
+  Use: "run [file]",
+  Short: "Run from a build specification file",
+  Args: cobra.ExactArgs(1),
+  Run: func (cmd *cobra.Command, args []string) {
+    status, err := mainRunSpecJsonFile(args[0])
+    if err != nil {
+      fmt.Println(err)
+    }
+    os.Exit(status)
+  },
+}
+
+
+func init () {
+  cmd_root.AddCommand(cmd_run)
+
+  cmd_run.Flags().BoolVar(&print_spec, "print-spec", false, "Print the build specification tree when execution is finished")
+}
+
+func main () {
+  if err := cmd_root.Execute(); err != nil {
     fmt.Println(err)
+    os.Exit(1)
   }
-  os.Exit(status)
 }
