@@ -122,6 +122,7 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
   })
 
   if err := root.Run(); err != nil {
+    t.Log(SprintSpec(root))
     t.Fatal(err)
   }
 

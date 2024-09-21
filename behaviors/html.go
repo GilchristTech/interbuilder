@@ -6,13 +6,17 @@ import (
   "fmt"
   "golang.org/x/net/html"
   "io"
+  "strings"
 )
 
 
 var TaskResolverApplyPathTransformationsToHtmlContent = TaskResolver {
-  Id:   "apply-path-transformations-html-content",
-  Name: "apply-path-transformations",
+  Id:   "apply-path-transformations-html",
+  Name: "apply-path-transformations-html",
   MatchFunc: func (name string, spec *Spec) (bool, error) {
+    if name != "apply-path-transformations-html" {
+      return false, nil
+    }
     return len(spec.PathTransformations) > 0, nil
   },
   TaskPrototype: Task {
@@ -156,4 +160,33 @@ func TaskMapApplyPathTransformationsToHtmlContent (a *Asset) (*Asset, error) {
   }
 
   return a, nil
+}
+
+
+/*
+  HTML task inference
+*/
+var TaskResolverAssetsInferHtml = TaskResolver {
+  Name: "assets-infer",
+  Id:   "assets-infer-html-path-transformations",
+  MatchFunc: func (name string, spec *Spec) (bool, error) {
+    if ! strings.HasPrefix(name, "assets-infer") {
+      return false, nil
+    }
+
+    if len(spec.PathTransformations) == 0 {
+      return false, nil
+    }
+
+    return true, nil
+  },
+
+  TaskPrototype: Task {
+    MatchMimePrefix: "text/html",
+
+    Func: func (s *Spec, tk *Task) error {
+      s.EnqueueTaskName("apply-path-transformations-html")
+      return nil
+    },
+  },
 }

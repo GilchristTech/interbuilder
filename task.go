@@ -13,11 +13,17 @@ type TaskMapFunc   func (*Asset) (*Asset, error)
 type TaskMatchFunc func (name string, spec *Spec) (bool, error)
 
 
+/*
+  TaskResolvers are a hierarchical system of matching conditions
+  for Tasks, and act as the factories to build them. When a Spec
+  is told to search for a Task, it will navigate its own
+  TaskResolver tree, and if a match isn't found, it will look
+  among its parents. 
+*/
 type TaskResolver struct {
   Name          string
   Url           url.URL
   Id            string
-  MatchFunc     TaskMatchFunc
   TaskPrototype Task  // TODO: consider renaming. TaskTemplate, perhaps? Also consider making private.
 
   Spec          *Spec
@@ -25,6 +31,9 @@ type TaskResolver struct {
 
   Next          *TaskResolver
   Children      *TaskResolver
+
+  MatchBlocks   bool
+  MatchFunc     TaskMatchFunc
 }
 
 
@@ -137,10 +146,12 @@ func (tr *TaskResolver) Match (name string, s *Spec) (*TaskResolver, error) {
       return nil, nil
     }
 
-    child_match, err := tr.MatchChildren(name, s)
-    if err != nil { return nil, err }
-    if child_match != nil {
-      return child_match, nil
+    if tr.MatchBlocks == false {
+      child_match, err := tr.MatchChildren(name, s)
+      if err != nil { return nil, err }
+      if child_match != nil {
+        return child_match, nil
+      }
     }
 
     return tr, nil
@@ -151,10 +162,12 @@ func (tr *TaskResolver) Match (name string, s *Spec) (*TaskResolver, error) {
     return nil, err
   }
 
-  child_match, err := tr.MatchChildren(name, s)
-  if err != nil { return nil, err }
-  if child_match != nil {
-    return child_match, nil
+  if tr.MatchBlocks == false {
+    child_match, err := tr.MatchChildren(name, s)
+    if err != nil { return nil, err }
+    if child_match != nil {
+      return child_match, nil
+    }
   }
 
   return tr, nil
@@ -192,8 +205,8 @@ func (tr *TaskResolver) GetTask (name string, s *Spec) (*Task, error) {
   if resolver == nil || err != nil {
     return nil, err
   }
-  if resolver.TaskPrototype.Func == nil {
-    return nil, fmt.Errorf("Task resolver has a null task function")
+  if resolver.TaskPrototype.Func == nil && resolver.TaskPrototype.MapFunc == nil {
+    return nil, fmt.Errorf("Task resolver has a nil Func and MapFunc")
   }
   return resolver.NewTask(), nil
 }
@@ -315,13 +328,33 @@ func (s *Spec) GetTaskResolverById (id string) *TaskResolver {
 
 /*
   Append a TaskResolver to this Spec, taking priority over
-  previously-added and parental resolvers
+  previously-added and parental resolvers.
 */
 func (s *Spec) AddTaskResolver (tr *TaskResolver) {
   var end *TaskResolver
   for end = tr ; end.Next != nil ; end = end.Next {}
   end.Next = s.TaskResolvers
   s.TaskResolvers = tr
+}
+
+
+/*
+  Append a TaskResolver to this TaskResolver as a child, taking
+  priority over previously-added and sub-resolvers.
+*/
+func (tr *TaskResolver) AddTaskResolver (add *TaskResolver) {
+  // Search for the last sibling
+  //
+  var last_sibling *TaskResolver = add
+  for ; last_sibling.Next != nil ; last_sibling = last_sibling.Next {}
+
+  last_sibling.Next = tr.Children
+
+  if add != last_sibling {
+    add.Next = last_sibling
+  }
+
+  tr.Children = add
 }
 
 
@@ -839,15 +872,17 @@ func (tr *TaskResolver) MatchWithAsset (a *Asset) (*TaskResolver, error) {
   } else if this_matches == false {
     return nil, nil
   }
-  
+
   // This resolver, tr, matches.
   // Check children for matches, which take precedence
   //
-  child_match, err := tr.MatchChildrenWithAsset(a)
-  if err != nil {
-    return nil, nil
-  } else if child_match != nil {
-    return child_match, err
+  if tr.MatchBlocks == false {
+    child_match, err := tr.MatchChildrenWithAsset(a)
+    if err != nil {
+      return nil, nil
+    } else if child_match != nil {
+      return child_match, err
+    }
   }
 
   // No children match, but this resolver does.

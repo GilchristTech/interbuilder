@@ -95,7 +95,6 @@ var TaskResolverInferSourceNodeJS = TaskResolver {
     Func: func (spec *Spec, task *Task) error {
       if _, e := spec.EnqueueTaskName("source-install-nodejs"); e != nil { return e }
       if _, e := spec.EnqueueTaskName("source-build-nodejs");   e != nil { return e }
-      // if _, e := spec.EnqueueTaskName("source-emit");           e != nil { return e }
       return nil
     },
   },
@@ -145,44 +144,54 @@ var TaskResolverSourceBuildNodeJS = TaskResolver {
 }
 
 
-func TaskSourceBuildNodeJS (s *Spec, t *Task) error {
+func TaskSourceBuildNodeJS (spec *Spec, task *Task) error {
   // Check if build path already exists and emit it, if so
   //
-  exists, err := s.PathExists("dist")
-  if err != nil { return err }
-  if exists {
-    s.EmitFileKey("dist", "/")
-    return nil
+
+  // TODO: check props: emit (as a filepath-like string), emit.dir (string)
+  // TODO: this should accept @source assets
+
+  var check_paths = []string {
+    "dist",
+    "build",
   }
 
-  exists, err = s.PathExists("build")
-  if err != nil { return err }
-  if exists {
-    s.EmitFileKey("build", "/")
-    return nil
+  for _, path := range check_paths {
+    if dist_exists, err := spec.PathExists(path); err != nil {
+      return err
+
+    } else if dist_exists {
+      dist_asset, err := spec.MakeFileKeyAsset(path, "/")
+      if err != nil { return err }
+
+      err = task.EmitAsset(dist_asset)
+      if err != nil { return err }
+      return nil
+    }
   }
 
   // Run build command
   //
-  _, err = t.CommandRun("npm", "run", "build")
+  _, err := task.CommandRun("npm", "run", "build")
   if err != nil { return err }
 
-  // Emit output
-  // TODO: break this up into its own task
-  //
-  exists, err = s.PathExists("dist")
-  if err != nil { return err }
-  if exists {
-    s.EmitFileKey("dist", "/")
-    return nil
+  // TODO: emit @emit assets
+
+  for _, path := range check_paths {
+    if dist_exists, err := spec.PathExists(path); err != nil {
+      return err
+
+    } else if dist_exists {
+      dist_asset, err := spec.MakeFileKeyAsset(path, "/")
+      if err != nil { return err }
+
+      err = task.EmitAsset(dist_asset)
+      if err != nil { return err }
+      return nil
+    }
   }
 
-  exists, err = s.PathExists("build")
-  if err != nil { return err }
-  if exists {
-    s.EmitFileKey("build", "/")
-    return nil
-  }
+  spec.EnqueueTaskName("infer-assets")
 
   return nil
 }
