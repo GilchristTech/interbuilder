@@ -507,6 +507,16 @@ func (s *Spec) DeferTaskFunc (name string, f TaskFunc) *Task {
 }
 
 
+/*
+  DeferTaskMapFunc creates a new Task with the specified name
+  and asset map function (`f`), defers it for execution in the
+  task queue, and returns it.
+*/
+func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) *Task {
+  return s.DeferTask(s.NewTaskMapFunc(name, f))
+}
+
+
 
 /*
   PushTask adds a Task to the push queue. The push queue is a

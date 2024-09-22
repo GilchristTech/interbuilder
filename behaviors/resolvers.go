@@ -117,7 +117,7 @@ func ResolveTaskSourceGitClone (s *Spec) error {
 
   var is_git_scheme bool = source.Scheme == "git"
   var is_github     bool = source.Host == "github.com"
-  var is_git_file   bool = strings.HasSuffix(source.Path, ".git")
+  var is_git_file   bool = strings.HasSuffix(source.Path, ".git") // TODO: suppose this is a URL with form parameters; this would not pick up such a case
 
   if ( is_git_scheme || is_github || is_git_file ){
     _, err := s.EnqueueUniqueTaskName("git-clone")

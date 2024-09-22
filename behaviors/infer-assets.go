@@ -84,6 +84,14 @@ func TaskAssetsInferRoot (spec *Spec, tk *Task) error {
     }
   }
 
+  // Next, using the resolvers matched so far, match those tasks
+  // using Assets and for each matching resolver, enqueue one
+  // task.
+  //
+  var num_tasks  = 0
+  var num_assets = len(tk.Assets)
+  defer tk.Println("Pushed", num_tasks, "tasks from", num_assets, "assets")
+
   for _, asset := range tk.Assets {
     for resolver_id, resolver := range spec_matched_resolvers {
       matched_resolver, err := resolver.MatchWithAsset(asset)
@@ -101,6 +109,7 @@ func TaskAssetsInferRoot (spec *Spec, tk *Task) error {
       }
 
       delete(spec_matched_resolvers, resolver_id)
+      num_tasks++
     }
   }
 

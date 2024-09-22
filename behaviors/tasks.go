@@ -95,6 +95,7 @@ var TaskResolverInferSourceNodeJS = TaskResolver {
     Func: func (spec *Spec, task *Task) error {
       if _, e := spec.EnqueueTaskName("source-install-nodejs"); e != nil { return e }
       if _, e := spec.EnqueueTaskName("source-build-nodejs");   e != nil { return e }
+      if _, e := spec.EnqueueTaskName("assets-infer");          e != nil { return e }
       return nil
     },
   },
@@ -216,15 +217,19 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
     }
   }
 
-  for input := range s.Input {
+  // TODO: find a way not to have to load everything into memory
+  if err != task.PoolSpecInputAssets() {
+    return err
+  }
+
+  for _, input := range task.Assets {
     assets, err := input.Flatten()
     if err != nil { return err }
 
     for _, asset := range assets {
       task.Println(asset.Url.String())
       if asset.FileSource == "" {
-        // TODO: check more specifically if the file can be resolved into a file, i.e: if it has content
-        s.EmitAsset(asset)
+        task.EmitAsset(asset)
         continue
       }
 
@@ -254,7 +259,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
 
         new_asset := s.AnnexAsset(asset)
         new_asset.FileSource = dest
-        if err := s.EmitAsset(new_asset); err != nil {
+        if err := task.EmitAsset(new_asset); err != nil {
           return err
         }
       } else {
@@ -271,7 +276,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
 
         new_asset.ContentModified = false
         new_asset.FileSource = new_asset.FileDest
-        if err := s.EmitAsset(new_asset); err != nil {
+        if err := task.EmitAsset(new_asset); err != nil {
           return err
         }
       }

@@ -41,8 +41,8 @@ $(COVERAGE_FILE): $(DEPS_CHECK) $(MODULE_SRC)
 	go test -coverprofile=$(COVERAGE_FILE) ./ ./behaviors
 
 # TODO: remove. These build targets are temporary; The main build target is a CLI tool which requires arguments.
-# TODO: with these build targets being temporary, so is the specs.json which the current main function reads from
+# TODO: with these build targets being temporary, so is the example-specs.json which the current main function reads from
 run: $(CMD)
-	./$(CMD) specs.json
+	./$(CMD) run example-specs.json --print-spec
 run-watch:
 	$(WATCHER) 'make && make run || exit 1'
