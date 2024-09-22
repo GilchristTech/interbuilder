@@ -99,6 +99,16 @@ type Task struct {
   // same way it would receive singular assets.
   //
   AcceptMultiAssets bool
+
+  // IgnoreAssets indicates that this Task does not read or
+  // modify assets (this does not preclude the Task creating
+  // them). This allows the Asset emitting to skip this Task. An
+  // example of where this is useful, is in a Task which closes
+  // an IO resource, because the Asset can be emitted, and
+  // possibly freed from memory without requiring this task to be
+  // executed.
+  //
+  IgnoreAssets bool
 }
 
 
@@ -678,6 +688,13 @@ func (tk *Task) EmitAsset (a *Asset) error {
 
   // There is a task after this one.
   var next *Task = tk.Next
+
+  // If the next Task ignores Assets, skip to it emitting this
+  // asset.
+  //
+  if next.IgnoreAssets {
+    return next.EmitAsset(asset)
+  }
 
   // Handle pluralistic assets
   //

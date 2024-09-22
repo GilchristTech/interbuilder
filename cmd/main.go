@@ -82,7 +82,6 @@ var cmd_run = & cobra.Command {
       os.Exit(1)
     }
 
-
     // Create tasks for outputs
     //
     for output_i, output_dest := range flag_outputs {
@@ -109,16 +108,19 @@ var cmd_run = & cobra.Command {
         return a, nil
       })
 
+      // Defer a Task to close the file, if applicable
+      //
       if closer, ok := writer.(io.Closer); ok {
         if closer == os.Stdout {
           goto DONT_CLOSE
         }
 
-        var task_name = fmt.Sprintf("cli-output-close-%d", output_i)
-        root.DeferTaskFunc(task_name, func (*Spec, *Task) error {
+        var task_name  = fmt.Sprintf("cli-output-close-%d", output_i)
+        var close_task = root.DeferTaskFunc(task_name, func (*Spec, *Task) error {
           closer.Close()
           return nil
         })
+        close_task.IgnoreAssets = true
       }
       DONT_CLOSE:
     }

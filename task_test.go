@@ -417,6 +417,49 @@ func TestTaskEmitAsset (t *testing.T) {
 }
 
 
+func TestTaskIgnoreAssets (t *testing.T) {
+  var root = NewSpec("root", nil)
+
+  var num_consumed_assets = 0
+
+  root.EnqueueTaskFunc("produce-asset", func (s *Spec, tk *Task) error {
+    return tk.EmitAsset(s.MakeAsset("asset"))
+  })
+
+  ignore_task := root.EnqueueTaskFunc("ignore-assets", func (s *Spec, tk *Task) error {
+    if len(tk.Assets) != 0 {
+      t.Fatalf("IgnoreAssets task encountered an asset")
+    }
+    return nil
+  })
+  ignore_task.IgnoreAssets = true
+
+  root.EnqueueTaskFunc("consume-assets", func (s *Spec, tk *Task) error {
+    num_consumed_assets = len(tk.Assets)
+    if got, expect := num_consumed_assets, 1; got != expect {
+      t.Fatalf("consume-assets expected %d assets, got %d", expect, got)
+    }
+
+    var asset = tk.Assets[0]
+    var key = strings.TrimLeft(asset.Url.Path, "/")
+
+    if got , expect := key, "asset"; got != expect {
+      t.Fatalf("consume-assets got one asset; expected key to be %s, got %s",  expect, got)
+    }
+
+    return nil
+  })
+
+  if err := root.Run(); err != nil {
+    t.Fatal(err)
+  }
+
+  if got, expect := num_consumed_assets, 1; got != expect {
+    t.Fatalf("consume-assets expected %d assets, got %d", expect, got)
+  }
+}
+
+
 func TestTaskEmitMultiAsset (t *testing.T) {
   var resolver_produce_asset_single = TaskResolver {
     Name: "produce-asset-singular",
