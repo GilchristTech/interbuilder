@@ -353,16 +353,13 @@ func (s *Spec) AddTaskResolver (tr *TaskResolver) {
   priority over previously-added and sub-resolvers.
 */
 func (tr *TaskResolver) AddTaskResolver (add *TaskResolver) {
+  var existing_children = tr.Children
+
   // Search for the last sibling
   //
   var last_sibling *TaskResolver = add
   for ; last_sibling.Next != nil ; last_sibling = last_sibling.Next {}
-
-  last_sibling.Next = tr.Children
-
-  if add != last_sibling {
-    add.Next = last_sibling
-  }
+  last_sibling.Next = existing_children
 
   tr.Children = add
 }

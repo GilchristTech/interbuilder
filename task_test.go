@@ -22,14 +22,16 @@ func TestSpecGetTaskResolverById (t *testing.T) {
   var resolver_4b = & TaskResolver { Id: "task_name_4" }
   var resolver_4a = & TaskResolver { Id: "task_name_4" }
   var resolver_3  = & TaskResolver { Id: "task_name_3" }
-  var resolver_2  = & TaskResolver { Id: "task_name_2", Next: resolver_4a }
+  var resolver_2  = & TaskResolver { Id: "task_name_2" }
   var resolver_1  = & TaskResolver { Id: "task_name_1", Next: resolver_2 }
 
   var resolver_0 = & TaskResolver {
     Id:       "task_name_0",
-    Children: resolver_1,
     Next:     resolver_3,
   }
+
+  resolver_0.AddTaskResolver(resolver_1)
+  resolver_2.AddTaskResolver(resolver_4a)
 
   root.AddTaskResolver(resolver_0)
   subspec.AddTaskResolver(resolver_4b)

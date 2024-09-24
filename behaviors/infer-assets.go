@@ -76,8 +76,8 @@ func TaskAssetsInferRoot (spec *Spec, tk *Task) error {
         continue
       }
 
-      if match, err := infer.Match("assets-infer", spec); err != nil {
-        return nil
+      if match, err := infer.Match(infer.Name, spec); err != nil {
+        return err
       } else if match != nil {
         spec_matched_resolvers[infer.Id] = infer
       }

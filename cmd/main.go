@@ -20,6 +20,7 @@ func MakeDefaultRootSpec () *Spec {
   //
   root.AddSpecResolver(behaviors.ResolveSourceURLType)
   root.AddSpecResolver(behaviors.ResolveSourceDir)
+  root.AddSpecResolver(behaviors.ResolveTransform)
 
   // Source code inference layer
   //
@@ -29,8 +30,11 @@ func MakeDefaultRootSpec () *Spec {
 
   // Asset content inference
   //
-  root.AddTaskResolver(& behaviors.TaskResolverAssetsInferRoot)
-  behaviors.TaskResolverAssetsInferRoot.AddTaskResolver(& behaviors.TaskResolverAssetsInferHtml)
+  assets_infer      := & behaviors.TaskResolverAssetsInferRoot
+  assets_infer_html := & behaviors.TaskResolverAssetsInferHtml
+  assets_infer.AddTaskResolver(assets_infer_html)
+  root.AddTaskResolver(assets_infer)
+
   root.AddTaskResolver(& behaviors.TaskResolverApplyPathTransformationsToHtmlContent)
 
   root.PushTaskFunc("root-consume", behaviors.TaskConsumeLinkFiles)
