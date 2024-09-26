@@ -308,7 +308,7 @@ func (s *Spec) Run () error {
   // close the Input channel once the InputGroup WaitGroup is
   // Done, in turn causing the asset consumption in the loop
   // below to finish.
-  //
+
   CONSUME_INPUT_AND_ERRORS:
   for {
     select {
@@ -326,12 +326,13 @@ func (s *Spec) Run () error {
         close(error_chan)
         break CONSUME_INPUT_AND_ERRORS
       }
+
       if err := s.EmitAsset(asset); err != nil {
         return err
       }
     }
   }
-  
+
   if err := <- error_chan; err != nil {
     return err
   }

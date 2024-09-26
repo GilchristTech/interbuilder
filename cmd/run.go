@@ -22,7 +22,7 @@ var cmd_run = & cobra.Command {
 
     // handle flag: --print-spec
     //
-    if print_spec {
+    if Flag_print_spec {
       defer func () {
         fmt.Println()
         PrintSpec(root)
@@ -44,18 +44,18 @@ var cmd_run = & cobra.Command {
 
     // Create tasks for outputs
     //
-    for output_i, output_dest := range flag_outputs {
+    for output_i, output_dest := range Flag_outputs {
       var task_name = fmt.Sprintf("cli-output-%d", output_i)
-      var writer io.Writer
 
-      if output_dest == "-" {
-        writer = os.Stdout
-      } else {
-        writer, err = os.Create(output_dest)
-        if err != nil {
-          fmt.Println(err)
-          os.Exit(1)
-        }
+      var writer io.Writer
+      var closer io.Closer
+      var err    error
+
+      writer, closer, err = outputStringToWriter(output_dest)
+
+      if err != nil {
+        fmt.Println(err)
+        os.Exit(1)
       }
 
       root.EnqueueTaskMapFunc(task_name, func (a *Asset) (*Asset, error) {
@@ -70,7 +70,7 @@ var cmd_run = & cobra.Command {
 
       // Defer a Task to close the file, if applicable
       //
-      if closer, ok := writer.(io.Closer); ok {
+      if closer != nil {
         if closer == os.Stdout {
           goto DONT_CLOSE
         }

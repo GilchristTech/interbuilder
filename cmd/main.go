@@ -51,24 +51,6 @@ var cmd_root = & cobra.Command {
 }
 
 
-var print_spec   bool
-var flag_outputs []string
-
-
-func init () {
-  cmd_root.AddCommand(cmd_run)
-
-  cmd_run.Flags().BoolVar(
-    &print_spec, "print-spec", false,
-    "Print the build specification tree when execution is finished",
-  )
-
-  cmd_run.Flags().StringArrayVarP(
-    &flag_outputs, "output", "o", []string{},
-    "Specify an output",
-  )
-}
-
 func main () {
   if err := cmd_root.Execute(); err != nil {
     fmt.Println(err)
