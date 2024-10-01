@@ -234,7 +234,7 @@ func AssetTextMarshal (a *Asset, encoding_mask uint64) ([]byte, error) {
     if writen_field { encoded.WriteString("\t") }; writen_field = true
     
     if encode_content_length {
-      encoded.WriteString(string(len(content)))
+      fmt.Fprintf(encoded, "%d", len(content))
     }
 
     if err != nil {

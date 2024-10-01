@@ -13,12 +13,33 @@ import (
 
 
 var cmd_run = & cobra.Command {
-  Use: "run [file]",
+  Use: "run [file] [outputs...]",
   Short: "Run from a build specification file",
-  Args: cobra.ExactArgs(1),
+  Args: cobra.MinimumNArgs(1),
   Run: func (cmd *cobra.Command, args []string) {
-    var root       *Spec = MakeDefaultRootSpec()
     var spec_file string = args[0]
+    var output_args = args[1:]
+
+    // Parse outputs
+    //
+    var output_definitions []cliOutputDefinition
+    var err error
+
+    // Parse output positional arguments
+    if output_definitions, err = parseOutputArgs(output_args); err != nil {
+      fmt.Printf("Error parsing output arguments:\n\t%v\n", err)
+      os.Exit(1)
+    }
+
+    // Parse flag outputs (--output and -o)
+    if flag_outputs, err := parseOutputArgs(Flag_outputs); err != nil {
+      fmt.Printf("Error parsing output flags:\n\t%v\n", err)
+      os.Exit(1)
+    } else if len(flag_outputs) > 0 {
+      output_definitions = append(output_definitions, flag_outputs...)
+    }
+
+    var root       *Spec = MakeDefaultRootSpec()
 
     // handle flag: --print-spec
     //
@@ -44,14 +65,14 @@ var cmd_run = & cobra.Command {
 
     // Create tasks for outputs
     //
-    for output_i, output_dest := range Flag_outputs {
+    for output_i, output_definition := range output_definitions {
       var task_name = fmt.Sprintf("cli-output-%d", output_i)
 
       var writer io.Writer
       var closer io.Closer
       var err    error
 
-      writer, closer, err = outputStringToWriter(output_dest)
+      writer, closer, err = outputStringToWriter(output_definition.Dest)
 
       if err != nil {
         fmt.Println(err)
@@ -59,8 +80,7 @@ var cmd_run = & cobra.Command {
       }
 
       root.EnqueueTaskMapFunc(task_name, func (a *Asset) (*Asset, error) {
-        asset_json, err := AssetJsonMarshal(
-          a, ASSET_ENCODING_DEFAULT )
+        asset_json, err := AssetMarshal(a, output_definition.Encoding)
 
         if err != nil {
           return nil, err
