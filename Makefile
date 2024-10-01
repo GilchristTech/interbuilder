@@ -10,7 +10,7 @@ WATCHER := npx nodemon -w . -w Makefile -e go,mod,sum,json -i .deps_checked -i b
 $(CMD): $(DEPS_CHECK) $(CMD_SRC) $(MODULE_SRC)
 	go build -o $(CMD) $(CMD_SRC)
 
-.PHONY: all deps build cli run clean watch test test-watch
+.PHONY: all deps build cli clean watch test test-watch
 
 all:   $(CMD)
 build: $(CMD)
@@ -39,10 +39,3 @@ test-coverage-browser: $(COVERAGE_FILE)
 
 $(COVERAGE_FILE): $(DEPS_CHECK) $(MODULE_SRC)
 	go test -coverprofile=$(COVERAGE_FILE) ./ ./behaviors
-
-# TODO: remove. These build targets are temporary; The main build target is a CLI tool which requires arguments.
-# TODO: with these build targets being temporary, so is the example-specs.json which the current main function reads from
-run: $(CMD)
-	./$(CMD) run example-specs.json --print-spec
-run-watch:
-	$(WATCHER) 'make && make run || exit 1'
