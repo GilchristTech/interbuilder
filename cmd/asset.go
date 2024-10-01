@@ -8,6 +8,7 @@ import (
   "net/url"
   "strings"
   "bufio"
+  "bytes"
   "fmt"; "io"; "os"
 )
 
@@ -100,9 +101,28 @@ func AssetJsonUnmarshal (data []byte) (*Asset, error) {
 }
 
 
+func AssetMarshal (a *Asset, encoding_mask uint64) ([]byte, error) {
+  // Get the type of asset and use the appropriate marshal function
+  //
+  var asset_encoding_format = encoding_mask & ASSET_ENCODING_FIELDS_FORMAT
+  
+  switch asset_encoding_format {
+    case 0:
+      return nil, fmt.Errorf("Encoding format is undefined")
+    case ASSET_ENCODING_JSON:
+      return AssetJsonMarshal(a, encoding_mask)
+    case ASSET_ENCODING_TEXT:
+      return AssetTextMarshal(a, encoding_mask)
+  }
+
+  return nil, fmt.Errorf("Unrecognized format in asset encoding mask with value 0o%o", encoding_mask)
+}
+
+
 func AssetJsonMarshal (a *Asset, encoding_mask uint64) ([]byte, error) {
   if encoding_mask == 0 {
-    encoding_mask = ASSET_ENCODING_DEFAULT 
+    encoding_mask  = ASSET_ENCODING_DEFAULT & ^ASSET_ENCODING_FIELDS_FORMAT
+    encoding_mask |= ASSET_ENCODING_JSON
   }
 
   var encode_json           = encoding_mask & ASSET_ENCODING_JSON           != 0
@@ -167,6 +187,81 @@ func AssetJsonMarshal (a *Asset, encoding_mask uint64) ([]byte, error) {
   }
 
   return json.Marshal(&marshal_data)
+}
+
+
+func AssetTextMarshal (a *Asset, encoding_mask uint64) ([]byte, error) {
+  if encoding_mask == 0 {
+    encoding_mask  = ASSET_ENCODING_DEFAULT & ^ASSET_ENCODING_FIELDS_FORMAT
+    encoding_mask |= ASSET_ENCODING_TEXT
+  }
+
+  var encode_text           = encoding_mask & ASSET_ENCODING_TEXT           != 0
+  var encode_url            = encoding_mask & ASSET_ENCODING_URL            != 0
+  var encode_mimetype       = encoding_mask & ASSET_ENCODING_MIMETYPE       != 0
+  var encode_content        = encoding_mask & ASSET_ENCODING_FIELDS_CONTENT != 0
+  var encode_content_string = encoding_mask & ASSET_ENCODING_CONTENT_STRING != 0
+  var encode_content_base64 = encoding_mask & ASSET_ENCODING_CONTENT_BASE64 != 0
+  var encode_content_length = encoding_mask & ASSET_ENCODING_CONTENT_LENGTH != 0
+
+  if encode_text == false {
+    return nil, fmt.Errorf("Asset encoding is not text")
+  }
+
+  var encoded = bytes.NewBuffer([]byte{})
+  var writen_field = false
+
+  if encode_url {
+    if writen_field { encoded.WriteString("\t") }; writen_field = true
+    encoded.WriteString(a.Url.String())
+  }
+
+  var is_text = false
+
+  if encode_mimetype {
+    if writen_field { encoded.WriteString("\t") }; writen_field = true
+    if a.Mimetype != "" {
+      encoded.WriteString(a.Mimetype)
+
+      if strings.HasPrefix(a.Mimetype, "text") {
+        is_text = true
+      }
+    }
+  }
+
+  if encode_content {
+    content, err := a.GetContentBytes()
+    if writen_field { encoded.WriteString("\t") }; writen_field = true
+    
+    if encode_content_length {
+      encoded.WriteString(string(len(content)))
+    }
+
+    if err != nil {
+      return nil, err
+    }
+
+    var use_base64 = false
+    var use_string = false
+
+    if encode_content_string && encode_content_base64 {
+      use_string =  is_text
+      use_base64 = !is_text
+    } else if encode_content_string {
+      use_string = true
+    } else if encode_content_base64 {
+      use_base64 = true
+    }
+
+    if use_string {
+      encoded.Write(content)
+    } else if use_base64 {
+      content := base64.StdEncoding.EncodeToString(content)
+      encoded.WriteString(content)
+    }
+  }
+
+  return encoded.Bytes(), nil
 }
 
 
@@ -274,11 +369,11 @@ var cmd_assets = & cobra.Command {
       })
 
       output_spec.EnqueueTaskMapFunc(spec_name, func (a *Asset) (*Asset, error) {
-        asset_json, err := AssetJsonMarshal(a, output_definition.Encoding)
+        asset_encoded, err := AssetMarshal(a, output_definition.Encoding)
         if err != nil {
           return nil, err
         }
-        writer.Write(asset_json)
+        writer.Write(asset_encoded)
         writer.Write([]byte("\n"))
         return a, nil
       })
