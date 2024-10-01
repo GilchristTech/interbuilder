@@ -59,7 +59,9 @@ var cmd_run = & cobra.Command {
       }
 
       root.EnqueueTaskMapFunc(task_name, func (a *Asset) (*Asset, error) {
-        asset_json, err := AssetJsonMarshal(a)
+        asset_json, err := AssetJsonMarshal(
+          a, ASSET_ENCODING_DEFAULT )
+
         if err != nil {
           return nil, err
         }
@@ -100,5 +102,3 @@ var cmd_run = & cobra.Command {
     }
   },
 }
-
-

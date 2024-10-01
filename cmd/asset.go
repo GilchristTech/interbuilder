@@ -12,15 +12,44 @@ import (
 )
 
 
+var (
+  ASSET_ENCODING_FIELDS            uint64 = 0b11_111_111
+  ASSET_ENCODING_FIELDS_PROPERTIES uint64 = 0b00_000_111
+  ASSET_ENCODING_FIELDS_CONTENT    uint64 = 0b00_111_000
+  ASSET_ENCODING_FIELDS_FORMAT     uint64 = 0b11_000_000
+
+  ASSET_ENCODING_JSON              uint64 = 0b01_000_000
+  ASSET_ENCODING_TEXT              uint64 = 0b10_000_000
+
+  ASSET_ENCODING_URL               uint64 = 0b00_000_001
+  ASSET_ENCODING_MIMETYPE          uint64 = 0b00_000_010
+  ASSET_ENCODING_FORMAT            uint64 = 0b00_000_100
+
+  ASSET_ENCODING_CONTENT_STRING    uint64 = 0b00_001_000
+  ASSET_ENCODING_CONTENT_BASE64    uint64 = 0b00_010_000
+  ASSET_ENCODING_CONTENT_LENGTH    uint64 = 0b00_100_000
+)
+
+
+var ASSET_ENCODING_DEFAULT    = (
+  ASSET_ENCODING_JSON           |
+  ASSET_ENCODING_URL            |
+  ASSET_ENCODING_CONTENT_STRING |
+  ASSET_ENCODING_CONTENT_BASE64 |
+  ASSET_ENCODING_MIMETYPE       )
+
+
 type AssetEncoding struct {
   Url      string `json:"url"`
   Mimetype string `json:"mimetype,omitempty"`
 
-  Content struct {
-    String string `json:"string,omitempty"`
-    Base64 string `json:"base64,omitempty"`
-    // Bytes  []byte `json:"bytes,omitempty"`
-  } `json:"content"`
+  Content *AssetEncodingContent `json:"content,omitempty"`
+}
+
+type AssetEncodingContent struct {
+  Length    int `json:"length,omitempty"`
+  String string `json:"string,omitempty"`
+  Base64 string `json:"base64,omitempty"`
 }
 
 
@@ -71,29 +100,70 @@ func AssetJsonUnmarshal (data []byte) (*Asset, error) {
 }
 
 
-func AssetJsonMarshal (a *Asset) ([]byte, error) {
+func AssetJsonMarshal (a *Asset, encoding_mask uint64) ([]byte, error) {
+  if encoding_mask == 0 {
+    encoding_mask = ASSET_ENCODING_DEFAULT 
+  }
+
+  var encode_json           = encoding_mask & ASSET_ENCODING_JSON           != 0
+  var encode_url            = encoding_mask & ASSET_ENCODING_URL            != 0
+  var encode_mimetype       = encoding_mask & ASSET_ENCODING_MIMETYPE       != 0
+  var encode_content        = encoding_mask & ASSET_ENCODING_FIELDS_CONTENT != 0
+  var encode_content_string = encoding_mask & ASSET_ENCODING_CONTENT_STRING != 0
+  var encode_content_base64 = encoding_mask & ASSET_ENCODING_CONTENT_BASE64 != 0
+  var encode_content_length = encoding_mask & ASSET_ENCODING_CONTENT_LENGTH != 0
+
+  if encode_json == false {
+    return nil, fmt.Errorf("Asset encoding is not JSON")
+  }
+
   var marshal_data AssetEncoding
 
-  marshal_data.Url = a.Url.String()
+  if encode_url {
+    marshal_data.Url = a.Url.String()
+  }
 
   var is_text = false
 
-  if a.Mimetype != "" {
-    marshal_data.Mimetype = a.Mimetype
-    if strings.HasPrefix(a.Mimetype, "text") {
-      is_text = true
+  if encode_mimetype {
+    if a.Mimetype != "" {
+      marshal_data.Mimetype = a.Mimetype
+      if strings.HasPrefix(a.Mimetype, "text") {
+        is_text = true
+      }
     }
   }
 
-  content, err := a.GetContentBytes()
-  if err != nil {
-    return nil, err
-  }
+  if encode_content {
+    marshal_data.Content = & AssetEncodingContent {}
 
-  if is_text {
-    marshal_data.Content.String = string(content)
-  } else {
-    marshal_data.Content.Base64 = base64.StdEncoding.EncodeToString(content)
+    content, err := a.GetContentBytes()
+    
+    if encode_content_length {
+      marshal_data.Content.Length = len(content)
+    }
+
+    if err != nil {
+      return nil, err
+    }
+
+    var use_base64 = false
+    var use_string = false
+
+    if encode_content_string && encode_content_base64 {
+      use_string =  is_text
+      use_base64 = !is_text
+    } else if encode_content_string {
+      use_string = true
+    } else if encode_content_base64 {
+      use_base64 = true
+    }
+
+    if use_string {
+      marshal_data.Content.String = string(content)
+    } else if use_base64 {
+      marshal_data.Content.Base64 = base64.StdEncoding.EncodeToString(content)
+    }
   }
 
   return json.Marshal(&marshal_data)
@@ -103,8 +173,26 @@ func AssetJsonMarshal (a *Asset) ([]byte, error) {
 var cmd_assets = & cobra.Command {
   Use: "assets",
   Short: "Operate on Interbuilder assets and run simple ETL operations",
-  Args: cobra.ExactArgs(0),
   Run: func (cmd *cobra.Command, args []string) {
+    // Parse outputs
+    //
+    var output_definitions []cliOutputDefinition
+    var err error
+
+    // Parse output positional arguments
+    if output_definitions, err = parseOutputArgs(args); err != nil {
+      fmt.Printf("Error parsing output arguments:\n\t%v\n", err)
+      os.Exit(1)
+    }
+
+    // Parse flag outputs (--output and -o)
+    if flag_outputs, err := parseOutputArgs(Flag_outputs); err != nil {
+      fmt.Printf("Error parsing output flags:\n\t%v\n", err)
+      os.Exit(1)
+    } else if len(flag_outputs) > 0 {
+      output_definitions = append(output_definitions, flag_outputs...)
+    }
+
     // Check if we are reading from a pipe
     //
     var read_stdin = false
@@ -149,11 +237,16 @@ var cmd_assets = & cobra.Command {
 
     // TRANSFORM
     //
+    // Currently, this Spec for transformations simply acts as a
+    // central point for collecting assets from inputs and
+    // distributing them to outputs, but defining transformation
+    // tasks from the CLI is intended.
+    //
     var transform = root.AddSubspec(NewSpec("cli-transform", nil))
 
     // WRITE/LOAD
     //
-    for output_i, output_dest := range Flag_outputs {
+    for output_i, output_definition := range output_definitions {
       var spec_name   string = fmt.Sprintf("cli-output-%d", output_i)
       var output_spec  *Spec = root.AddSubspec(NewSpec(spec_name, nil))
 
@@ -161,10 +254,10 @@ var cmd_assets = & cobra.Command {
       var closer io.Closer
       var err    error
 
-      writer, closer, err = outputStringToWriter(output_dest)
+      writer, closer, err = outputStringToWriter(output_definition.Dest)
 
       if err != nil {
-        fmt.Println("Error opening output %d:\n%v\n", output_i, err)
+        fmt.Printf("Error opening output %d:\n%v\n", output_i, err)
         os.Exit(1)
       }
 
@@ -181,7 +274,7 @@ var cmd_assets = & cobra.Command {
       })
 
       output_spec.EnqueueTaskMapFunc(spec_name, func (a *Asset) (*Asset, error) {
-        asset_json, err := AssetJsonMarshal(a)
+        asset_json, err := AssetJsonMarshal(a, output_definition.Encoding)
         if err != nil {
           return nil, err
         }
@@ -248,7 +341,7 @@ var cmd_assets = & cobra.Command {
     }
 
     if err := root.Run(); err != nil {
-      fmt.Println("Error while running root spec:\n%v", err)
+      fmt.Printf("Error while running root spec:\n%v", err)
       os.Exit(1)
     }
   },
