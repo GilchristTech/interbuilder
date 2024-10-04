@@ -7,7 +7,6 @@ import (
 
   "fmt"
   "os"
-  "io"
   "encoding/json"
 )
 
@@ -39,7 +38,7 @@ var cmd_run = & cobra.Command {
       output_definitions = append(output_definitions, flag_outputs...)
     }
 
-    var root       *Spec = MakeDefaultRootSpec()
+    var root *Spec = MakeDefaultRootSpec()
 
     // handle flag: --print-spec
     //
@@ -67,44 +66,10 @@ var cmd_run = & cobra.Command {
     //
     for output_i, output_definition := range output_definitions {
       var task_name = fmt.Sprintf("cli-output-%d", output_i)
-
-      var writer io.Writer
-      var closer io.Closer
-      var err    error
-
-      writer, closer, err = outputStringToWriter(output_definition.Dest)
-
-      if err != nil {
-        fmt.Println(err)
+      if err := output_definition.EnqueueTasks(task_name, root); err != nil {
+        fmt.Println("Error while creating creating output tasks:\n\t%v\n", err)
         os.Exit(1)
       }
-
-      root.EnqueueTaskMapFunc(task_name, func (a *Asset) (*Asset, error) {
-        asset_json, err := AssetMarshal(a, output_definition.Encoding)
-
-        if err != nil {
-          return nil, err
-        }
-        writer.Write(asset_json)
-        writer.Write([]byte("\n"))
-        return a, nil
-      })
-
-      // Defer a Task to close the file, if applicable
-      //
-      if closer != nil {
-        if closer == os.Stdout {
-          goto DONT_CLOSE
-        }
-
-        var task_name  = fmt.Sprintf("cli-output-close-%d", output_i)
-        var close_task = root.DeferTaskFunc(task_name, func (*Spec, *Task) error {
-          closer.Close()
-          return nil
-        })
-        close_task.IgnoreAssets = true
-      }
-      DONT_CLOSE:
     }
 
     // Resolve

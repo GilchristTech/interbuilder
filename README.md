@@ -45,6 +45,17 @@ interbuilder assets --input assets.json \
   format:default,text,no-string,no-mimetype output.json
 ```
 
+Asset outputs can also be filtered using a similar syntax. For
+example, to define two outputs, one which takes assets with a
+file extension of `.html` and another output which takes all
+pictures from a path with a path prefix of `/static/`, one could
+use the following:
+```bash
+interbuilder assets --input - \
+  filter:extension=html html-assets.json \
+  filter:prefix=/static/,mime=picture/ static-picture-assets.json
+```
+
 ## Spec JSON usage
 
 ## Compilation, running, and tests:

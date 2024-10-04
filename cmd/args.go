@@ -1,6 +1,7 @@
 package main
 
 import (
+  . "gilchrist.tech/interbuilder"
   "github.com/spf13/cobra"
   "os"
   "io"
@@ -74,8 +75,126 @@ func inputStringToReader (input_str string) (io.Reader, io.Closer, error) {
 
 
 type cliOutputDefinition struct {
-  Dest     string
-  Encoding uint64
+  Dest      string
+  Encoding  uint64
+  Filters   []cliFilterDefinition
+}
+
+
+type cliFilterDefinition struct {
+  Invert    bool
+  Mimetype  string
+  Prefix    string
+  Suffix    string
+}
+
+
+func (od *cliOutputDefinition) EnqueueTasks (name string, spec *Spec) (error) {
+  var writer io.Writer
+  var closer io.Closer
+  var err    error
+
+  writer, closer, err = outputStringToWriter(od.Dest)
+
+  if err != nil {
+    return fmt.Errorf("Error opening output: %w", err)
+  }
+
+  // Enqueue a task to consume spec input and forward assets
+  //
+  spec.EnqueueTaskFunc(name+"-consume", func (s *Spec, tk *Task) error {
+    if err := tk.ForwardAssets(); err != nil {
+      return err
+    }
+
+    for { select {
+    case <-tk.CancelChan:
+      return nil
+    case asset_chunk, ok := <- s.Input:
+      if !ok {
+        return nil
+      }
+      tk.EmitAsset(asset_chunk)
+    }}
+  })
+
+  // Enqueue filter tasks
+  //
+  for filter_i, filter_definition := range od.Filters {
+    var filter_name = fmt.Sprintf("%s-filter-%d", name, filter_i)
+    filter_definition.EnqueueTask(filter_name, spec)
+  }
+
+  // Enqueue write task
+  //
+  spec.EnqueueTaskMapFunc(name, func (a *Asset) (*Asset, error) {
+    asset_encoded, err := AssetMarshal(a, od.Encoding)
+    if err != nil {
+      return nil, err
+    }
+    writer.Write(asset_encoded)
+    writer.Write([]byte("\n"))
+    return a, nil
+  })
+
+  // Defer a Task to close the file, if applicable
+  //
+  if closer != nil {
+    if closer == os.Stdout {
+      goto DONT_CLOSE
+    }
+
+    var close_task = spec.DeferTaskFunc(name+"-close", func (*Spec, *Task) error {
+      closer.Close()
+      return nil
+    })
+    close_task.IgnoreAssets = true
+  }
+  DONT_CLOSE:
+
+  return nil
+}
+
+
+func (od *cliOutputDefinition) MakeSpec (spec_name string) (*Spec, error) {
+  var output_spec = NewSpec(spec_name, nil)
+  if err := od.EnqueueTasks(spec_name, output_spec); err != nil {
+    return nil, err
+  }
+  return output_spec, nil
+}
+
+
+func (fd *cliFilterDefinition) EnqueueTask (name string, spec *Spec) {
+  var prefix = strings.TrimPrefix(fd.Prefix, "/")
+
+  spec.EnqueueTaskMapFunc(name, func (asset *Asset) (*Asset, error) {
+    var path string
+
+    if fd.Mimetype != "" {
+      if strings.HasPrefix(asset.Mimetype, fd.Mimetype) == fd.Invert {
+        return nil, nil
+      }
+    }
+
+    path = strings.TrimLeft(asset.Url.Path, "/")
+    path = strings.TrimPrefix(path, "@emit")
+    path = strings.TrimLeft(path, "/")
+
+    if fd.Suffix != "" {
+      if strings.HasSuffix(path, fd.Suffix) == fd.Invert {
+        return nil, nil
+      }
+    }
+
+    if fd.Prefix != "" {
+      if strings.HasPrefix(path, prefix) == fd.Invert {
+        return nil, nil
+      }
+    }
+
+    return asset, nil
+  })
 }
 
 
@@ -148,6 +267,10 @@ func (od *cliOutputDefinition) SetEncodingField (field_name string) error {
 
 
 func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
+  // Outputs definitions are built in-place within this array,
+  // and the last element, an incomplete definition, is truncated
+  // from what is returned.
+  //
   var outputs = []cliOutputDefinition {
     cliOutputDefinition { },
   }
@@ -155,19 +278,13 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
 
   var expect_definition = false
 
-  for arg_i, arg := range args {
-    var is_format      bool = strings.HasPrefix(arg, "format:")
-    var is_destination bool = ! is_format
+  for _, arg := range args {
 
-    if !is_destination && expect_definition {
-      // A destination is expected, but this argument is not a
-      // destination; exit with an error.
-      //
-      return nil, fmt.Errorf(
-        "A destination was expected in output argument %d, but got %s instead\n",
-        arg_i+1, arg,
-      )
-    }
+    // Figure out what the argument is.
+    // Only one of these conditions should be true.
+    var is_format      bool = strings.HasPrefix(arg, "format:")
+    var is_filter      bool = strings.HasPrefix(arg, "filter:")
+    var is_destination bool = !is_format && !is_filter
 
     if is_format {
       // Parse format definition
@@ -184,6 +301,15 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
 
       // The next argument needs to be a destination
       expect_definition = true
+
+    } else if is_filter {
+      var filter_arg = arg[len("filter:") : ]
+      if filters, err := parseFilterArg(filter_arg); err != nil {
+        return nil, err
+      } else if len(filters) >= 1 {
+        output_definition.Filters = append(output_definition.Filters, filters...)
+      }
+
     } else if is_destination {
       output_definition.Dest = arg
       expect_definition = false
@@ -198,7 +324,7 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
       output_definition = & outputs[len(outputs)-1]
 
     } else {
-      panic("Argument is neither a format nor definition; this should be impossible.")
+      panic("Argument is neither a format, filter, nor definition; this should be impossible.")
     }
   }
 
@@ -219,4 +345,74 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
   outputs = outputs[:len(outputs)-1]
 
   return outputs, nil
+}
+
+
+func parseFilterArg (arg string) ([]cliFilterDefinition, error) {
+  var filters = []cliFilterDefinition {
+    {},
+  }
+
+  for strings.HasPrefix(arg, "filter:") {
+    arg = arg[ len("filter:") : ]
+  }
+
+  // Destructively parse the argument string
+  //
+  for {
+    arg = strings.TrimLeft(arg, " \n\t\r")
+    if len(arg) == 0 {
+      break
+    }
+
+    var filter = &filters[len(filters)-1]
+
+    // Prefixing a filter with a minus inverts the query
+    //
+    if arg[0] == '-' {
+      filter.Invert = !filter.Invert
+      arg = arg[1:]
+      continue
+    }
+
+    var equals_index int = strings.Index(arg, "=")
+
+    if equals_index == -1 {
+      return nil, fmt.Errorf("Syntax error in filter definition, expected '='")
+    }
+
+    var filter_field string = arg[:equals_index]
+    arg = arg[ 1 + equals_index : ]
+
+    var filter_operand_end_index int = strings.Index(arg, ",")
+    if filter_operand_end_index == -1 {
+      filter_operand_end_index = len(arg)
+    }
+
+    var filter_value string = arg[:filter_operand_end_index]
+    arg = arg[filter_operand_end_index:]
+
+    switch filter_field {
+      case "mimetype", "mime":
+        filter.Mimetype = filter_value
+      case "prefix":
+        filter.Prefix = filter_value
+      case "suffix":
+        filter.Suffix = filter_value
+      case "extension", "ext":
+        filter.Suffix = "." + strings.TrimLeft(filter_value, ".")
+      default:
+        return nil, fmt.Errorf("Unrecognized filter field: %s", filter_field)
+    }
+
+    filters = append(filters, cliFilterDefinition {})
+
+    arg = strings.TrimLeft(arg, ",")
+    
+    // By here, `arg` will be trimmed to the left of one valid
+    // filter, and the loop will continue expecting another, but
+    // terminate if there's nothing left.
+  }
+
+  return filters[:len(filters)], nil
 }

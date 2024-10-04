@@ -342,50 +342,15 @@ var cmd_assets = & cobra.Command {
     // WRITE/LOAD
     //
     for output_i, output_definition := range output_definitions {
-      var spec_name   string = fmt.Sprintf("cli-output-%d", output_i)
-      var output_spec  *Spec = root.AddSubspec(NewSpec(spec_name, nil))
+      var spec_name string = fmt.Sprintf("cli-output-%d", output_i)
 
-      var writer io.Writer
-      var closer io.Closer
-      var err    error
-
-      writer, closer, err = outputStringToWriter(output_definition.Dest)
-
-      if err != nil {
-        fmt.Printf("Error opening output %d:\n%v\n", output_i, err)
+      if output_spec, err := output_definition.MakeSpec(spec_name); err != nil {
+        fmt.Println("Error while making output spec from arguments in output %d:\n%v\n", output_i, err)
         os.Exit(1)
+      } else {
+        root.AddSubspec(output_spec)
+        transform.AddOutputSpec(output_spec)
       }
-
-      output_spec.EnqueueTaskFunc("consume", func (s *Spec, tk *Task) error {
-        for { select {
-        case <-tk.CancelChan:
-          return nil
-        case asset_chunk, ok := <- s.Input:
-          if !ok {
-            return nil
-          }
-          tk.EmitAsset(asset_chunk)
-        }}
-      })
-
-      output_spec.EnqueueTaskMapFunc(spec_name, func (a *Asset) (*Asset, error) {
-        asset_encoded, err := AssetMarshal(a, output_definition.Encoding)
-        if err != nil {
-          return nil, err
-        }
-        writer.Write(asset_encoded)
-        writer.Write([]byte("\n"))
-        return a, nil
-      })
-
-      if closer != nil {
-        close_task := output_spec.DeferTaskFunc(spec_name +"-close", func (s *Spec, tk *Task) error {
-          return closer.Close()
-        })
-        close_task.IgnoreAssets = true
-      }
-
-      transform.AddOutputSpec(output_spec)
     }
 
     // READ/EXTRACT
