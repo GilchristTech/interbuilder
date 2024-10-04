@@ -6,6 +6,47 @@ generate them.
 
 This software's initial version is still in development.
 
+This repository contains the core Interbuilder package in the
+repository's root, the behaviors package in the `behaviors`
+directory, and the CLI package in the `cmd` directory. 
+
+## CLI Usage
+
+Depending on the subcommand used, the Interbuilder CLI can run
+existing build specifications, and create simple asset pipelines.
+
+### `interbuilder run`: Run a build specification file
+
+### `interbuilder assets`: Run simple asset pipelines
+
+### Controlling asset outputs
+
+Wherever asset outputs are able to be specified in the CLI, they
+can be preceded with any number of arguments which change the
+asset format and filtering. By default, an output will receive
+all assets from the root spec in the form of JSON, with content
+encoded in plain or base64 encoded strings, along with asset URLs
+and MIME types. The format can be controlled with a positional
+argument starting with `format:`, followed by a comma-separated
+list of tags which control what to include in the formatting.
+This default behavior can be manually-specified like so:
+
+```bash
+interbuilder run example.spec.json \
+  format:json,url,mimetype,string,base64 assets.json
+```
+
+These these can be enabled with the shorthand tag, `default`, and
+then those tags can be disabled by prefixing them with `no-`.
+Also, the format can be set from `json` to `text`. For example:
+
+```bash
+interbuilder assets --input assets.json \
+  format:default,text,no-string,no-mimetype output.json
+```
+
+## Spec JSON usage
+
 ## Compilation, running, and tests:
 
 Most actions related to compilation and testing are defined in
@@ -34,7 +75,7 @@ and test coverage can be viewed with `make test-coverage` or
 ## Pipeline Concepts
 
 For the user, an Interbuilder pipeline is meant to be defined in
-a short JSON file. This is meant to hide
+a short JSON file. This is meant to unburden the user with managing the pipeline and every particular of their build process when working at a high level.
 
 ### Build Specifications (Specs)
   Interbuilder organizes data pipelines into a tree of Specs
