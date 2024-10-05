@@ -227,7 +227,8 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
     if err != nil { return err }
 
     for _, asset := range assets {
-      task.Println(asset.Url.String())
+      // TODO: look for a prop which toggles printing Asset URLs
+      // task.Println(asset.Url.String())
       if asset.FileSource == "" {
         task.EmitAsset(asset)
         continue

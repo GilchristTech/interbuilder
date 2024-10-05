@@ -37,10 +37,13 @@ func TestHtmlPipeline (t *testing.T) {
       <head>
         <meta charset="UTF-8">
         <title>Internal page</title>
+        <script src="/bundle.js"></script>
       </head>
       <body>
         <a href="/page/">Internal link</a>
         <a href="http://example.com">External link</a>
+        <a href="javascript:alert();">Javascript link</a>
+        <a href="javascript:;">Empty Javascript link</a>
       </body>
       </html>
     `)
@@ -114,16 +117,24 @@ func TestHtmlPipeline (t *testing.T) {
         t.Errorf("Unrecognized file name: %s", file_name)
 
       case "index.html":
-        var expected string
-
-        expected = "href=\"/transformed/page/\""
-        if ! strings.Contains(content, expected) {
-          t.Errorf("HTML content does not contain %s", expected)
+        var expected_cases = []string {
+          "href=\"/transformed/page/\"",
+          "src=\"/transformed/bundle.js\"",
+          "href=\"javascript:;\"",
+          "href=\"javascript:alert();\"",
+          "href=\"http://example.com\"",
         }
 
-        expected = "href=\"http://example.com\""
-        if ! strings.Contains(content, expected) {
-          t.Errorf("HTML content does not contain %s", expected)
+        var printed_source = false
+
+        for _, expected := range expected_cases {
+          if ! strings.Contains(content, expected) {
+            if ! printed_source {
+              t.Log(content)
+              printed_source = true
+            }
+            t.Errorf("HTML content does not contain %s", expected)
+          }
         }
 
       case "file.txt":

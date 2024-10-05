@@ -37,40 +37,60 @@ var TaskResolverApplyPathTransformationsToHtmlContent = TaskResolver {
 func HtmlNodeApplyPathTransformations (node *html.Node, base_url *url.URL, transformations []*PathTransformation) bool {
   var modified bool = false
 
-  if node.Type == html.ElementNode && node.Data == "a" {
+  if node.Type == html.ElementNode {
     for attr_i := range node.Attr {
-      if node.Attr[attr_i].Key == "href" {
-        href_relative, err := url.Parse(node.Attr[attr_i].Val)
+      var modify_attribute bool   = false
+      var attribute_key    string = node.Attr[attr_i].Key
+      var attribute_value  string = node.Attr[attr_i].Val
 
-        if err != nil {
-          continue
-        }
+      if strings.HasPrefix(attribute_value, "javascript:") {
+        continue
+      }
 
-        href_url := base_url.ResolveReference(href_relative)
+      switch attribute_key {
+        case "href", "src", "srcset":
+          modify_attribute = true
+      }
 
-        var original_path string = href_url.Path
-        var path          string = original_path
+      if modify_attribute == false {
+        continue
+      }
 
-        for _, transformation := range transformations {
-          path = transformation.TransformPath(path)
-        }
+      href_relative, err := url.Parse(attribute_value)
 
-        if original_path != path {
-          modified = true
-          href_url.Path = path
+      if href_relative.Host != "" {
+        continue
+      }
 
-          if href_relative.Host == "" {
-            node.Attr[attr_i].Val = href_url.Path
-          } else {
-            node.Attr[attr_i].Val = href_url.String()
-          }
+      if err != nil {
+        continue
+      }
+
+      href_url := base_url.ResolveReference(href_relative)
+
+      var original_path string = href_url.Path
+      var path          string = original_path
+
+      for _, transformation := range transformations {
+        path = transformation.TransformPath(path)
+      }
+
+      if original_path != path {
+        modified = true
+        href_url.Path = path
+
+        if href_relative.Host == "" {
+          node.Attr[attr_i].Val = href_url.Path
+        } else {
+          node.Attr[attr_i].Val = href_url.String()
         }
       }
     }
   }
 
   for child := node.FirstChild; child != nil; child = child.NextSibling {
-    modified = modified || HtmlNodeApplyPathTransformations(child, base_url, transformations)
+    child_modified := HtmlNodeApplyPathTransformations(child, base_url, transformations)
+    modified = modified || child_modified
   }
 
   return modified
@@ -134,7 +154,7 @@ func TaskMapContentDataHtmlHandlers (a *Asset) (*Asset, error) {
 /*
   TaskMapApplyPathTransformationsToHtmlContent is a Task MapFunc
   which reads an Asset's Spec's PathTransformations and applies
-  them to 
+  them to assets, assuming their content is HTML.
 */
 func TaskMapApplyPathTransformationsToHtmlContent (a *Asset) (*Asset, error) {
   var err error
