@@ -4,6 +4,7 @@ go 1.22.4
 
 require (
 	github.com/spf13/cobra v1.8.1
+	github.com/tdewolff/parse/v2 v2.7.16
 	golang.org/x/net v0.28.0
 )
 
