@@ -30,10 +30,13 @@ func MakeDefaultRootSpec () *Spec {
   //
   assets_infer      := & behaviors.TaskResolverAssetsInferRoot
   assets_infer_html := & behaviors.TaskResolverAssetsInferHtml
+  assets_infer_css  := & behaviors.TaskResolverAssetsInferCss
   assets_infer.AddTaskResolver(assets_infer_html)
+  assets_infer.AddTaskResolver(assets_infer_css)
   root.AddTaskResolver(assets_infer)
 
   root.AddTaskResolver(& behaviors.TaskResolverApplyPathTransformationsToHtmlContent)
+  root.AddTaskResolver(& behaviors.TaskResolverApplyPathTransformationsToCssContent)
 
   root.PushTaskFunc("root-consume", behaviors.TaskConsumeLinkFiles)
 
