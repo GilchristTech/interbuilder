@@ -551,7 +551,12 @@ func (a *Asset) Flatten () ([]*Asset, error) {
   var err error
 
   root_assets, err := a.Expand()
-  if err != nil { return nil, err }
+  if err != nil {
+    return nil, fmt.Errorf(
+      `Cannot flatten, encountered error when expanding asset with url "%s": %w`,
+      a.Url, err,
+    )
+  }
 
   flattened_assets := make([]*Asset, 0, len(root_assets))
 
@@ -562,7 +567,13 @@ func (a *Asset) Flatten () ([]*Asset, error) {
     }
 
     assets, err := root_asset.Flatten()
-    if err != nil { return nil, err }
+    if err != nil {
+      return nil, fmt.Errorf(
+        `Could not flatten, encountered error when recursively flattening asset with URL "%s": %w"`,
+        a.Url, err,
+      )
+    }
+
     flattened_assets = append(flattened_assets, assets...)
   }
 

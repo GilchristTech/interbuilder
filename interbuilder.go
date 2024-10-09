@@ -243,14 +243,14 @@ func (s *Spec) Run () error {
     //
     if t := s.Tasks.GetCircularTask(); t != nil {
       return fmt.Errorf(
-        "[%s] Error: repeating (circular) task entry in task list: %s",
+        "Error in spec %s: repeating (circular) task entry in task list: %s",
         s.Name, t.ResolverId,
       )
     }
 
     if (task.Func == nil) && (task.MapFunc == nil) {
       err := fmt.Errorf(
-        "[%s] Error: task \"%s\" doesn't have a Func or MapFunc defined",
+        "Error in spec %s: task \"%s\" doesn't have a Func or MapFunc defined",
         s.Name, task.Name,
       )
       return err
@@ -269,12 +269,12 @@ func (s *Spec) Run () error {
     if err := task.Run(s); err != nil {
       if task.ResolverId != "" {
         return fmt.Errorf(
-          "[%s/%s] Error in task (%s): %w\n",
+          "Error in spec %s, in task %s (%s): %w\n",
           s.Name, task.Name, task.ResolverId, err,
         )
       } else {
         return fmt.Errorf(
-          "[%s/%s] Error in task: %w\n",
+          "Error in spec %s, in task %s: %w\n",
           s.Name, task.Name, err,
         )
       }

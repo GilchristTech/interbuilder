@@ -38,7 +38,7 @@ func MakeDefaultRootSpec () *Spec {
   root.AddTaskResolver(& behaviors.TaskResolverApplyPathTransformationsToHtmlContent)
   root.AddTaskResolver(& behaviors.TaskResolverApplyPathTransformationsToCssContent)
 
-  root.PushTaskFunc("root-consume", behaviors.TaskConsumeLinkFiles)
+  root.DeferTaskFunc("root-consume", behaviors.TaskConsumeLinkFiles)
 
   // Subspec layer
   //

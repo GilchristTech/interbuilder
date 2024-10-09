@@ -82,6 +82,9 @@ var cmd_run = & cobra.Command {
     // Run tasks
     //
     if err = root.Run() ; err != nil {
+      if Flag_print_spec {
+        PrintSpec(root)
+      }
       fmt.Printf("Error while running build specs: %v\n", err)
       os.Exit(1)
     }

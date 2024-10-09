@@ -798,7 +798,10 @@ func (tk *Task) PoolSpecInputAssets () error {
 
     if ! tk.RejectFlattenMultiAssets {
       if assets, err := asset_chunk.Flatten(); err != nil {
-        return err
+        return fmt.Errorf(
+          `Cannot pool assets, asset chunk with URL "%s" returned an error while flattening: %w"`,
+          asset_chunk.Url, err,
+        )
       } else {
         tk.Assets = append(tk.Assets, assets...)
       }

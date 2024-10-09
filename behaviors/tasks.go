@@ -204,8 +204,7 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
 
   // Remove directory contents, if it exists
   //
-  stat, err := os.Stat(source_dir) 
-  if stat != nil {
+  if stat, _ := os.Stat(source_dir); stat != nil {
     dirents, err := os.ReadDir(source_dir)
     if err != nil { return err }
 
@@ -215,11 +214,14 @@ func TaskConsumeLinkFiles (s *Spec, task *Task) error {
         return err
       }
     }
+
+    err = os.MkdirAll(source_dir, os.ModePerm)
+    if err != nil { return err }
   }
 
   // TODO: find a way not to have to load everything into memory
-  if err != task.PoolSpecInputAssets() {
-    return err
+  if err := task.PoolSpecInputAssets(); err != nil {
+    return fmt.Errorf("Cannot pool assets to write/link files, encountered error: %w", err)
   }
 
   for _, input := range task.Assets {
