@@ -7,6 +7,7 @@ import (
   "io"
   "strings"
   "fmt"
+  "regexp"
 )
 
 
@@ -278,22 +279,61 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
 
   var expect_definition = false
 
-  for _, arg := range args {
+  for arg_i, arg := range args {
 
     // Figure out what the argument is.
     // Only one of these conditions should be true.
-    var is_format      bool = strings.HasPrefix(arg, "format:")
-    var is_filter      bool = strings.HasPrefix(arg, "filter:")
+
+    var rgx_match_section = regexp.MustCompile(`^\s*(\w+)\s*:`)
+    var section_match     = rgx_match_section.FindStringSubmatch(arg)
+
+    var section string = "output"
+
+    if section_match != nil {
+      switch matched_section := section_match[1]; matched_section {
+      case "format", "filter":
+        section = matched_section
+      default:
+        return nil, fmt.Errorf(`Error parsing argument, unknown section "%s"`, matched_section)
+      }
+    }
+
+    var is_format      bool = section == "format"
+    var is_filter      bool = section == "filter"
     var is_destination bool = !is_format && !is_filter
 
+    var section_node *ExpressionNode = nil
+
+    // If this argument is an output expression, parse it
+    //
+    if is_format || is_filter {
+      if nodes, err := ParseExpressionString(arg, false); err != nil {
+        return nil, fmt.Errorf("Error parsing expression in argument %d: %w", err)
+
+      } else if expect, got := 1, len(nodes); expect != got {
+        return nil, fmt.Errorf("Argument %d contains %d sections, expected %d", arg_i, got, expect)
+
+      } else {
+        var node = nodes[0]
+
+        if got, expect := node.NodeType, EXPRESSION_NODE_SECTION; got != expect {
+          return nil, fmt.Errorf(
+            "Argument %d expected to parse a section node of type %s, got %s",
+            expect, got,
+          )
+        }
+
+        section_node = node
+      }
+    }
+
     if is_format {
-      // Parse format definition
+      for _, node := range section_node.Children {
+        if node.Value.TokenType.IsValue() == false {
+          return nil, fmt.Errorf("Error in argument %d, output format sections expect only values, got a field of type %s", node.NodeType)
+        }
 
-      var format_fields []string = strings.Split(
-        arg[ len("format:") : ], ",",
-      )
-
-      for _, field := range format_fields {
+        var field = node.Value.String()
         if err := output_definition.SetEncodingField(field); err != nil {
           return nil, err
         }
@@ -303,8 +343,7 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
       expect_definition = true
 
     } else if is_filter {
-      var filter_arg = arg[len("filter:") : ]
-      if filters, err := parseFilterArg(filter_arg); err != nil {
+      if filters, err := interpretFilterExpressionSection(section_node); err != nil {
         return nil, err
       } else if len(filters) >= 1 {
         output_definition.Filters = append(output_definition.Filters, filters...)
@@ -324,7 +363,7 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
       output_definition = & outputs[len(outputs)-1]
 
     } else {
-      panic("Argument is neither a format, filter, nor definition; this should be impossible.")
+      panic("Argument is neither a format, filter, nor definition; this code should be unreachable")
     }
   }
 
@@ -348,71 +387,75 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
 }
 
 
-func parseFilterArg (arg string) ([]cliFilterDefinition, error) {
-  var filters = []cliFilterDefinition {
-    {},
+func interpretFilterExpressionSection (filter_section *ExpressionNode) ([]cliFilterDefinition, error) {
+  var filters = []cliFilterDefinition {}
+
+  if got, expect := filter_section.NodeType, EXPRESSION_NODE_SECTION; got != expect {
+    return nil, fmt.Errorf("Expected an filter expression section, got a %s", got)
   }
 
-  for strings.HasPrefix(arg, "filter:") {
-    arg = arg[ len("filter:") : ]
-  }
+  for _, node := range filter_section.Children {
+    filters = append(filters, cliFilterDefinition {})
+    var filter = & filters[len(filters)-1]
 
-  // Destructively parse the argument string
-  //
-  for {
-    arg = strings.TrimLeft(arg, " \n\t\r")
-    if len(arg) == 0 {
-      break
-    }
-
-    var filter = &filters[len(filters)-1]
+    var field_name = node.Value.String()
 
     // Prefixing a filter with a minus inverts the query
     //
-    if arg[0] == '-' {
-      filter.Invert = !filter.Invert
-      arg = arg[1:]
-      continue
+    if strings.HasPrefix(field_name, "-") {
+      field_name    = strings.TrimLeft(field_name, "-")
+      filter.Invert = true
     }
 
-    var equals_index int = strings.Index(arg, "=")
+    if node.NodeType != EXPRESSION_NODE_ASSOCIATION {
+      return nil, fmt.Errorf(
+        `Unexpected %s in filter tokens of value "%s"`,
+        node.NodeType, node.Name,
+      )
 
-    if equals_index == -1 {
-      return nil, fmt.Errorf("Syntax error in filter definition, expected '='")
+    } else {
+      var association = node
+      var key_node, value_node *ExpressionNode
+
+      for _, child := range association.Children {
+        switch child.NodeType {
+        case EXPRESSION_NODE_NAME:
+          key_node = child
+        case EXPRESSION_NODE_VALUE:
+          value_node = child
+        }
+      }
+
+      if key_node == nil || value_node == nil {
+        return nil, fmt.Errorf("Could not determine key or value in association expression")
+      }
+
+      value, err := value_node.Value.EvaluateString()
+      if err != nil {
+        return nil, err
+      }
+
+      var name = key_node.Name
+
+      if strings.HasPrefix(name, "-") {
+        name = strings.TrimLeft(name, "-")
+        filter.Invert = true
+      }
+
+      switch name {
+        case "mimetype", "mime":
+          filter.Mimetype = value
+        case "prefix":
+          filter.Prefix = value
+        case "suffix":
+          filter.Suffix = value
+        case "extension", "ext":
+          filter.Suffix = "." + strings.TrimLeft(value, ".")
+        default:
+          return nil, fmt.Errorf("Unrecognized filter field: %s", name)
+      }
     }
-
-    var filter_field string = arg[:equals_index]
-    arg = arg[ 1 + equals_index : ]
-
-    var filter_operand_end_index int = strings.Index(arg, ",")
-    if filter_operand_end_index == -1 {
-      filter_operand_end_index = len(arg)
-    }
-
-    var filter_value string = arg[:filter_operand_end_index]
-    arg = arg[filter_operand_end_index:]
-
-    switch filter_field {
-      case "mimetype", "mime":
-        filter.Mimetype = filter_value
-      case "prefix":
-        filter.Prefix = filter_value
-      case "suffix":
-        filter.Suffix = filter_value
-      case "extension", "ext":
-        filter.Suffix = "." + strings.TrimLeft(filter_value, ".")
-      default:
-        return nil, fmt.Errorf("Unrecognized filter field: %s", filter_field)
-    }
-
-    filters = append(filters, cliFilterDefinition {})
-
-    arg = strings.TrimLeft(arg, ",")
-    
-    // By here, `arg` will be trimmed to the left of one valid
-    // filter, and the loop will continue expecting another, but
-    // terminate if there's nothing left.
   }
 
-  return filters[:len(filters)], nil
+  return filters, nil
 }
