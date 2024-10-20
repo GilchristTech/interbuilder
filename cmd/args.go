@@ -294,7 +294,7 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
       case "format", "filter":
         section = matched_section
       default:
-        return nil, fmt.Errorf(`Error parsing argument, unknown section "%s"`, matched_section)
+        return nil, fmt.Errorf(`Error parsing argument, unknown section "%w"`, matched_section)
       }
     }
 
@@ -308,7 +308,7 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
     //
     if is_format || is_filter {
       if nodes, err := ParseExpressionString(arg, false); err != nil {
-        return nil, fmt.Errorf("Error parsing expression in argument %d: %w", err)
+        return nil, fmt.Errorf("Error parsing expression in argument %d: %w", arg_i+1, err)
 
       } else if expect, got := 1, len(nodes); expect != got {
         return nil, fmt.Errorf("Argument %d contains %d sections, expected %d", arg_i, got, expect)
@@ -330,7 +330,7 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
     if is_format {
       for _, node := range section_node.Children {
         if node.Value.TokenType.IsValue() == false {
-          return nil, fmt.Errorf("Error in argument %d, output format sections expect only values, got a field of type %s", node.NodeType)
+          return nil, fmt.Errorf("Error parsing format section, only values are expected, got an expression of type %s", node.NodeType)
         }
 
         var field = node.Value.String()

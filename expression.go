@@ -512,6 +512,10 @@ func (pr *ExpressionParser) parseValue () (*ExpressionNode, error) {
   pr.skipWhitespace()
   var token = pr.peek()
 
+  if token == nil {
+    return nil, fmt.Errorf("Expected a value")
+  }
+
   var node = & ExpressionNode {
     NodeType: EXPRESSION_NODE_VALUE,
   }
