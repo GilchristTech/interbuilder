@@ -169,8 +169,8 @@ a short JSON file. This is meant to unburden the user with managing the pipeline
   Each Spec contains a typically user-defined JSON-like data
   structure for holding metadata and hints or instructions of
   which tasks are to be executed.  Tasks, Asset callback
-  functions, Resolvers, TaskResolvers, and Tasks read from these
-  as a configuration data structure.
+  functions, SpecBuilders, TaskResolvers, and Tasks read from
+  these as a configuration data structure.
 
 ### Tasks
   While Specs are ran in parallel, within each Spec is a
@@ -187,7 +187,7 @@ a short JSON file. This is meant to unburden the user with managing the pipeline
   Interbuilder uses URLs with the `ib://` scheme to denote
   different resources internally.
 
-### Prop Resolution (Resolvers)
+### Prop Resolution (SpecBuilders)
 
 ### Task Resolution and Handlers (TaskResolvers)
 

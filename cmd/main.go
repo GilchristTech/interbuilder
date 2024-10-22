@@ -16,15 +16,15 @@ func MakeDefaultRootSpec () *Spec {
 
   // Prop preprocessing layer
   //
-  root.AddSpecResolver(behaviors.ResolveSourceURLType)
-  root.AddSpecResolver(behaviors.ResolveSourceDir)
-  root.AddSpecResolver(behaviors.ResolveTransform)
+  root.AddSpecBuilder(behaviors.BuildSourceURLType)
+  root.AddSpecBuilder(behaviors.BuildSourceDir)
+  root.AddSpecBuilder(behaviors.BuildTransform)
 
   // Source code inference layer
   //
-  root.AddSpecResolver(behaviors.ResolveTaskInferSource) // TODO: rename to match TaskAssetsInfer?
-  root.AddSpecResolver(behaviors.ResolveTaskSourceGitClone)
-  root.AddSpecResolver(behaviors.ResolveTasksNodeJS)
+  root.AddSpecBuilder(behaviors.BuildTaskInferSource) // TODO: rename to match TaskAssetsInfer?
+  root.AddSpecBuilder(behaviors.BuildTaskSourceGitClone)
+  root.AddSpecBuilder(behaviors.BuildTasksNodeJS)
 
   // Asset content inference
   //
@@ -42,7 +42,7 @@ func MakeDefaultRootSpec () *Spec {
 
   // Subspec layer
   //
-  root.AddSpecResolver(behaviors.ResolveSubspecs)
+  root.AddSpecBuilder(behaviors.ResolveSubspecs)
 
   return root
 }

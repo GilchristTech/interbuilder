@@ -16,7 +16,7 @@ import (
   A Spec represents a node in a tree of concurrent user-defined
   operations which pass their output to their parents. They can
   be built using a JSON-like structure, and pass parsing rules
-  (SpecResolvers) of that structure to their children, with
+  (SpecBuilders) of that structure to their children, with
   parental rules being executed before child rules. Also, they
   have a namespacing and metadata-matching system (TaskResolvers)
   for determining which tasks to run, with child task resolvers
@@ -39,7 +39,7 @@ type Spec struct {
 
   PathTransformations []*PathTransformation
 
-  SpecResolvers   []SpecResolver
+  SpecBuilders    []SpecBuilder
   Props           SpecProps
 
   TaskResolvers   *TaskResolver
@@ -60,7 +60,7 @@ type HistoryEntry struct {
 }
 
 
-type SpecResolver func (*Spec) error
+type SpecBuilder func (*Spec) error
 
 func NewSpec (name string, spec_url *url.URL) *Spec {
   if spec_url == nil {
@@ -76,7 +76,7 @@ func NewSpec (name string, spec_url *url.URL) *Spec {
     OutputGroups:        make( [] *sync.WaitGroup,    0),
     Input:               make( chan *Asset             ),
     PathTransformations: make( []*PathTransformation, 0),
-    SpecResolvers:       make( [] SpecResolver,       0),
+    SpecBuilders:        make( [] SpecBuilder,        0),
     Props:               make( SpecProps               ),
   }
 
@@ -91,33 +91,34 @@ func (s *Spec) MakeUrl (paths ...string) *url.URL {
 }
 
 
-func (s *Spec) Resolve () error {
-  return s.ResolveOther(s)
+func (s *Spec) Build () error {
+  return s.BuildOther(s)
 }
 
 
-func (s *Spec) ResolveOther (o *Spec) error {
+func (s *Spec) BuildOther (o *Spec) error {
   if s.Parent != nil {
-    if err := s.Parent.ResolveOther(o); err != nil {
+    if err := s.Parent.BuildOther(o); err != nil {
       return err
     }
   }
 
-  for _, resolver := range s.SpecResolvers {
-    // Resolve this spec's 
-    if err := resolver(o); err != nil {
-      resolver_name := runtime.FuncForPC(reflect.ValueOf(resolver).Pointer()).Name()
+  // Build from this spec's builder functions
+  //
+  for _, builder := range s.SpecBuilders {
+    if err := builder(o); err != nil {
+      builder_name := runtime.FuncForPC(reflect.ValueOf(builder).Pointer()).Name()
 
       if o == s {
         return fmt.Errorf(
-          "Resolver error in Spec %s in resolver %s: %w",
-          s.Name, resolver_name, err,
+          "Builder error in Spec %s in builder %s: %w",
+          s.Name, builder_name, err,
         )
       }
 
       return fmt.Errorf(
-        "Resolver error in Spec %s (resolving via Spec %s) in resolver %s: %w",
-        o.Name, s.Name, resolver_name, err,
+        "Builder error in Spec %s (via builders in Spec %s) from builder %s: %w",
+        o.Name, s.Name, builder_name, err,
       )
     }
   }
@@ -126,8 +127,8 @@ func (s *Spec) ResolveOther (o *Spec) error {
 }
 
 
-func (s *Spec) AddSpecResolver (r SpecResolver) {
-  s.SpecResolvers = append(s.SpecResolvers, r)
+func (s *Spec) AddSpecBuilder (b SpecBuilder) {
+  s.SpecBuilders = append(s.SpecBuilders, b)
 }
 
 
@@ -239,13 +240,17 @@ func (s *Spec) Run () error {
       break TASK_LOOP
     }
 
-    // Assert a valid task queue, going forward
-    //
+    // Check there's a valid task queue, going forward
+
     if t := s.Tasks.GetCircularTask(); t != nil {
       return fmt.Errorf(
         "Error in spec %s: repeating (circular) task entry in task list: %s",
         s.Name, t.ResolverId,
       )
+    }
+
+    if task.Started {
+      return fmt.Errorf("Tried to run task, but it was already started")
     }
 
     if (task.Func == nil) && (task.MapFunc == nil) {

@@ -32,7 +32,7 @@ func ResolveSubspecs (s *Spec) error {
   }
 
   for _, subspec := range subspecs {
-    if err := subspec.Resolve(); err != nil {
+    if err := subspec.Build(); err != nil {
       return err
     }
   }
@@ -42,7 +42,7 @@ func ResolveSubspecs (s *Spec) error {
 }
 
 
-func ResolveSourceURLType (s *Spec) error {
+func BuildSourceURLType (s *Spec) error {
   source_any, found := s.Props["source"]
 
   if found == false {
@@ -69,11 +69,11 @@ func ResolveSourceURLType (s *Spec) error {
     return nil
   }
 
-  return fmt.Errorf("SpecResolver type error: source property expects a string or *url.URL, got %T", source_any)
+  return fmt.Errorf("SpecBuilder type error: source property expects a string or *url.URL, got %T", source_any)
 }
 
 
-func ResolveSourceDir (s *Spec) error {
+func BuildSourceDir (s *Spec) error {
   // TODO: path strings should be coerced into file URLs
 
   // Inherit source_nest
@@ -81,7 +81,7 @@ func ResolveSourceDir (s *Spec) error {
   //
   source_nest, ok, found := s.InheritPropString("source_nest")
   if found && !ok {
-    return fmt.Errorf("[%s] ResolveBuildDir error: Spec property 'source_nest' expects a String, got a %T", s.Name, s.Props["source_nest"])
+    return fmt.Errorf("[%s] BuildSourceDir error: Spec property 'source_nest' expects a String, got a %T", s.Name, s.Props["source_nest"])
   }
 
   if !found {
@@ -93,7 +93,7 @@ func ResolveSourceDir (s *Spec) error {
   source_dir, ok, found := s.GetPropString("source_dir")
 
   if found && !ok {
-    return fmt.Errorf("[%s] ResolveBuildDir error: Spec property 'source_dir' expects a String, got a %T", s.Name, s.Props["source_dir"])
+    return fmt.Errorf("[%s] ResolveSourceDir error: Spec property 'source_dir' expects a String, got a %T", s.Name, s.Props["source_dir"])
   }
 
   if !found {
@@ -105,7 +105,7 @@ func ResolveSourceDir (s *Spec) error {
 }
 
 
-func ResolveTaskSourceGitClone (s *Spec) error {
+func BuildTaskSourceGitClone (s *Spec) error {
   if s.GetTaskResolverById("source-git-clone") == nil {
     s.AddTaskResolver(&TaskResolverSourceGitClone)
   }
@@ -130,7 +130,7 @@ func ResolveTaskSourceGitClone (s *Spec) error {
 }
 
 
-func ResolveTaskInferSource (s *Spec) error {
+func BuildTaskInferSource (s *Spec) error {
   if s.GetTaskResolverById("source-infer-root") == nil {
     s.AddTaskResolver(&TaskResolverInferSource)
   }
@@ -138,7 +138,7 @@ func ResolveTaskInferSource (s *Spec) error {
 }
 
 
-func ResolveTasksNodeJS (s *Spec) error {
+func BuildTasksNodeJS (s *Spec) error {
   if s.GetTaskResolverById("source-install-nodejs") == nil {
     s.AddTaskResolver(&TaskResolverSourceInstallNodeJS)
   }
@@ -151,7 +151,7 @@ func ResolveTasksNodeJS (s *Spec) error {
 }
 
 
-func ResolveTransform (s *Spec) error {
+func BuildTransform (s *Spec) error {
   transform_any, transform_found := s.GetProp("transform")
   if ! transform_found {
     return nil

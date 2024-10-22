@@ -74,8 +74,8 @@ var cmd_run = & cobra.Command {
 
     // Resolve
     //
-    if err = root.Resolve() ; err != nil {
-      fmt.Printf("Error while resolving build specs: %v\n", err)
+    if err = root.Build() ; err != nil {
+      fmt.Printf("Error while building build specs: %v\n", err)
       os.Exit(1)
     }
 

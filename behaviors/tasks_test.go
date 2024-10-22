@@ -17,8 +17,8 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
   var root      *Spec = NewSpec("root", nil)
   var node_spec *Spec = root.AddSubspec(NewSpec("node_spec", nil))
 
-  root.AddSpecResolver(ResolveTaskInferSource)
-  root.AddSpecResolver(ResolveTasksNodeJS)
+  root.AddSpecBuilder(BuildTaskInferSource)
+  root.AddSpecBuilder(BuildTasksNodeJS)
 
   node_spec.Props["source_dir"] = t.TempDir()
 
@@ -87,8 +87,8 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
   node_spec.WriteFile("module-package/main.js", module_main_js_src, 0o660)
   if err != nil { t.Fatal(err) }
 
-  if err := root.Resolve(); err != nil {
-    t.Fatal("Could not resolve root spec:", err)
+  if err := root.Build(); err != nil {
+    t.Fatal("Could not build root spec:", err)
   }
 
   node_spec.EnqueueTaskName("source-infer")
