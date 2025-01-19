@@ -24,7 +24,7 @@ type TaskResolver struct {
   Name          string
   Url           url.URL
   Id            string
-  TaskPrototype Task  // TODO: consider renaming. TaskTemplate, perhaps? Also consider making private.
+  TaskPrototype Task  // TODO: consider making private.
 
   Spec          *Spec
   History       HistoryEntry
@@ -63,14 +63,14 @@ type Task struct {
   // Task callbacks are the serial execution mechanism of a
   // Spec's Task queue.
   //
-  Func       TaskFunc
+  Func TaskFunc
   
   // MapFunc task callback functions are ran over every Asset
   // emitted to this Task, and can be executed as part of the
   // emitting algorithm before a task is reached within the Task
   // queue.
   //
-  MapFunc    TaskMapFunc
+  MapFunc TaskMapFunc
 
   CancelChan chan bool
 
@@ -85,8 +85,9 @@ type Task struct {
 
   /*
     Asset quantity handling: Assets are capable of representing
-    either a single Asset, or act like a promise to expand into
-    more Assets. Because tasks can filter what 
+    either a single Asset or acting like a promise to expand into
+    more Assets. Tasks have flags to specify how they handle
+    these differing Asset quantities.
   */
 
   // When receiving a multi-asset, by default, if a Task does not
