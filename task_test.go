@@ -693,3 +693,82 @@ func TestTaskResolverMatchWithAsset (t *testing.T) {
     t.Fatalf("Expected task resolver with ID %s, got %s", expect.Id, got.Id)
   }
 }
+
+
+func TestTaskMaskEmit (t *testing.T) {
+  // Create a task which cannot emit assets, and make sure it
+  // errors when emitting an asset.
+  //
+  var task = Task {
+    Name: "erroring-emitter-test-task",
+    Mask: TASK_MASK_DEFINED,
+  }
+
+  if err := task.EmitAsset(& Asset {}); err == nil {
+    t.Fatalf("Task expected to error (mask is %03O)", task.Mask)
+  }
+
+  // TODO: add Task to spec with a MapFunc, but mask set not to accept assets.
+
+  var root = NewSpec("root", nil)
+
+  root.EnqueueTask(& Task {
+    Name: "only-emit",
+    Mask: TASK_ASSETS_GENERATE,
+    Func: func (sp *Spec, tk *Task) error {
+      var asset = sp.MakeAsset("emit1.txt")
+      return tk.EmitAsset(asset)
+    },
+  })
+
+  root.EnqueueTask(& Task {
+    Name: "ignore-assets",
+    Mask: TASK_MASK_DEFINED,
+    Func: func (sp *Spec, tk *Task) error {
+      if length := len(tk.Assets); length > 0 {
+        t.Errorf("Task set not to consume Assets had Assets in its buffer, with a length of %d Assets", length)
+      }
+      return nil
+    },
+  })
+
+  root.EnqueueTask(& Task {
+    Name: "emit-dont-consume",
+    Mask: TASK_ASSETS_GENERATE,
+    Func: func (sp *Spec, tk *Task) error {
+      if err := tk.EmitAsset(sp.MakeAsset("emit2.txt")); err != nil {
+        return fmt.Errorf("Error when emitting asset: %w", err)
+      }
+
+      if length := len(tk.Assets); length > 0 {
+        t.Errorf("Task set not to consume Assets had Assets in its buffer, with a length of %d Assets", length)
+      }
+
+      if err := tk.PoolSpecInputAssets(); err == nil {
+        t.Errorf("No error when pooling assets in a Task which should error when consuming assets.")
+      }
+
+      return nil
+    },
+  })
+
+  root.EnqueueTask(& Task {
+    Name: "consume-assets",
+    Mask: TASK_ASSETS_CONSUME,
+    Func: func (sp *Spec, tk *Task) error {
+      if err := tk.PoolSpecInputAssets(); err != nil {
+        return err
+      }
+
+      if length, expect := len(tk.Assets), 2; length != expect {
+        t.Errorf("Task expected to consume %d assets, got %d", expect, length)
+      }
+
+      return nil
+    },
+  })
+
+  if err := root.Run(); err != nil {
+    t.Fatalf("Spec exitted with an error: %v", err)
+  }
+}

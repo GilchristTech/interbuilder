@@ -26,6 +26,7 @@ var TaskResolverApplyPathTransformationsToCssContent = TaskResolver {
     return len(spec.PathTransformations) > 0, nil
   },
   TaskPrototype: Task {
+    Mask: TASK_ASSETS_MUTATE,
     MatchMimePrefix: "text/css",
     MapFunc: TaskMapApplyPathTransformationsToCssContent,
   },

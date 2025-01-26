@@ -19,6 +19,7 @@ var TaskResolverSourceGitClone = TaskResolver {
   Id: "source-git-clone",
   Name: "git-clone", // TODO: consider renaming to source-get-git
   TaskPrototype: Task {
+    Mask: TASK_MASK_DEFINED,
     Func: TaskSourceGitClone,
   },
 }

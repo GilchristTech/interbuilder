@@ -8,6 +8,34 @@ import (
   "strings"
 )
 
+
+/*
+  The Task Mask constants are bitmasks which define how tasks
+  work with Assets, whether they produce or consume, and what
+  kind of modifications they make to Assets. When used, they
+  allow for greater safety in Task queues, and can allow Tasks to
+  be skipped when emitting Assets.
+*/
+const (
+  TASK_FIELDS          uint64 = 0b_001_111_001  // All bits used by Task masks
+  TASK_FIELDS_ASSETS   uint64 = 0b_001_111_000  // Bits in Tasks masks for Asset behaviors
+
+  TASK_MASK_DEFINED    uint64 = 0b_000_000_001  // This bit distinguishes a Task
+                                                // mask with no permissions from
+                                                // one with undefined permissions,
+                                                // allowing masks with a zero
+                                                // value to act like a null value,
+                                                // rather than restrictive
+                                                // permission set.
+
+  TASK_ASSETS_EMIT     uint64 = 0b_001_000_001  // Task emits new Assets
+  TASK_ASSETS_CONSUME  uint64 = 0b_010_000_001  // Task relies on Assets
+  TASK_ASSETS_GENERATE uint64 = 0b_001_001_001  // Task creates new assets
+  TASK_ASSETS_FILTER   uint64 = 0b_011_010_001  // Task may not emit all Assets it consumes
+  TASK_ASSETS_MUTATE   uint64 = 0b_011_100_001  // Task changes the content of existing assets
+) 
+
+
 type TaskFunc      func (*Spec, *Task) error
 type TaskMapFunc   func (*Asset) (*Asset, error)
 type TaskMatchFunc func (name string, spec *Spec) (bool, error)
@@ -53,6 +81,12 @@ type Task struct {
   Started    bool
   Next       *Task
   History    HistoryEntry
+
+  // The Task Mask optionally specifies whether this task emits
+  // or consumes assets, and other more specific safety
+  // constraints.
+  //
+  Mask uint64
 
   Assets     []*Asset
 
@@ -108,6 +142,7 @@ type Task struct {
   // an IO resource, because the Asset can be emitted, and
   // possibly freed from memory without requiring this task to be
   // executed.
+  // TODO: deprecate, as this feature is redundant with the Task.Mask consume flag
   //
   IgnoreAssets bool
 }
@@ -669,29 +704,40 @@ func (s *Spec) flushTaskPushQueue () *Task {
   emitted.
 */
 func (tk *Task) EmitAsset (a *Asset) error {
+  // If the Task mask is defined but not set to emit, error. An undefined
+  // (zero) mask is okay.
+  //
+  if (tk.Mask & TASK_ASSETS_EMIT != TASK_ASSETS_EMIT) && tk.Mask != 0 {
+    return fmt.Errorf("Task cannot emit asset, Task.Mask has a value of %O", tk.Mask)
+  }
+
   var asset *Asset = a
   var err   error
+
+  var next *Task = tk.Next
+
+  // Don't emit to Tasks which cannot consume Assets due to their
+  // Mask. Search the task chain for a Task which can accept
+  // assets, or leave the `next` variable nil from trying.
+  //
+  for next = tk.Next; next != nil; next = next.Next {
+    if (!next.IgnoreAssets                                     &&
+        next.Mask == 0                                         ||
+        next.Mask & TASK_ASSETS_CONSUME == TASK_ASSETS_CONSUME ){
+      break
+    }
+  }
 
   // If this is the final task, the only place left for the asset
   // to go is being emitted by the Spec. Do so if it exists.
   //
-  if tk.Next == nil {
+  if next == nil {
     if tk.Spec != nil {
       if err := tk.Spec.EmitAsset(a); err != nil {
         return fmt.Errorf("Error in task %s emitting asset: %w", tk.Name, err)
       }
     }
     return nil
-  }
-
-  // There is a task after this one.
-  var next *Task = tk.Next
-
-  // If the next Task ignores Assets, skip to it emitting this
-  // asset.
-  //
-  if next.IgnoreAssets {
-    return next.EmitAsset(asset)
   }
 
   // Handle pluralistic assets
@@ -784,6 +830,13 @@ func (tk *Task) EmitAsset (a *Asset) error {
   efficient than using a range over the Input channel.
 */
 func (tk *Task) PoolSpecInputAssets () error {
+  // If the Task mask is defined but not set to emit, error. An undefined
+  // (zero) mask is okay.
+  //
+  if (tk.Mask & TASK_ASSETS_CONSUME != TASK_ASSETS_CONSUME) && tk.Mask != 0 {
+    return fmt.Errorf("Task cannot pool assets, Task.Mask has a value of %03O, and is not set to consume assets", tk.Mask)
+  }
+
   if tk.Spec == nil {
     return fmt.Errorf("Task Spec is nil")
   }
