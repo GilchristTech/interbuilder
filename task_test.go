@@ -453,12 +453,17 @@ func TestTaskIgnoreAssets (t *testing.T) {
     return tk.EmitAsset(s.MakeAsset("asset"))
   })
 
-  ignore_task := root.EnqueueTaskFunc("ignore-assets", func (s *Spec, tk *Task) error {
+  ignore_task, err := root.EnqueueTaskFunc("ignore-assets", func (s *Spec, tk *Task) error {
     if len(tk.Assets) != 0 {
       t.Fatalf("IgnoreAssets task encountered an asset")
     }
     return nil
   })
+
+  if err != nil {
+    t.Fatal(err)
+  }
+
   ignore_task.IgnoreAssets = true
 
   root.EnqueueTaskFunc("consume-assets", func (s *Spec, tk *Task) error {

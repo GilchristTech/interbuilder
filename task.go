@@ -17,22 +17,24 @@ import (
   be skipped when emitting Assets.
 */
 const (
-  TASK_FIELDS          uint64 = 0b_001_111_001  // All bits used by Task masks
-  TASK_FIELDS_ASSETS   uint64 = 0b_001_111_000  // Bits in Tasks masks for Asset behaviors
+  TASK_FIELDS          uint64 = 0b_000_001_111_001  // All bits used by Task masks
+  TASK_FIELDS_ASSETS   uint64 = 0b_000_001_111_000  // Bits in Tasks masks for Asset behaviors
 
-  TASK_MASK_DEFINED    uint64 = 0b_000_000_001  // This bit distinguishes a Task
-                                                // mask with no permissions from
-                                                // one with undefined permissions,
-                                                // allowing masks with a zero
-                                                // value to act like a null value,
-                                                // rather than restrictive
-                                                // permission set.
+  TASK_MASK_DEFINED    uint64 = 0b_000_000_000_001  // This bit distinguishes a Task
+                                                    // mask with no permissions from
+                                                    // one with undefined permissions,
+                                                    // allowing masks with a zero
+                                                    // value to act like a null value,
+                                                    // rather than restrictive
+                                                    // permission set.
 
-  TASK_ASSETS_EMIT     uint64 = 0b_001_000_001  // Task emits new Assets
-  TASK_ASSETS_CONSUME  uint64 = 0b_010_000_001  // Task relies on Assets
-  TASK_ASSETS_GENERATE uint64 = 0b_001_001_001  // Task creates new assets
-  TASK_ASSETS_FILTER   uint64 = 0b_011_010_001  // Task may not emit all Assets it consumes
-  TASK_ASSETS_MUTATE   uint64 = 0b_011_100_001  // Task changes the content of existing assets
+  TASK_ASSETS_EMIT     uint64 = 0b_000_001_000_001  // Task emits new Assets
+  TASK_ASSETS_CONSUME  uint64 = 0b_000_010_000_001  // Task relies on Assets
+  TASK_ASSETS_GENERATE uint64 = 0b_000_001_001_001  // Task creates new assets
+  TASK_ASSETS_FILTER   uint64 = 0b_000_011_010_001  // Task may not emit all Assets it consumes
+  TASK_ASSETS_MUTATE   uint64 = 0b_000_011_100_001  // Task changes the content of existing assets
+
+  TASK_TASKS_QUEUE     uint64 = 0b_001_000_000_001  // Task modifies the Task queue
 ) 
 
 
@@ -434,7 +436,7 @@ func (s *Spec) GetTask (name string, spec *Spec) (*Task, error) {
   Enqueued tasks are executed in first-in, first-out order, like
   a queue. Return the final inserted item.
 */
-func (sp *Spec) EnqueueTask (tk *Task) *Task {
+func (sp *Spec) EnqueueTask (tk *Task) (*Task, error) {
   sp.task_queue_lock.Lock()
   defer sp.task_queue_lock.Unlock()
 
@@ -448,7 +450,7 @@ func (sp *Spec) EnqueueTask (tk *Task) *Task {
     if next.Spec == sp {
       continue
     } else if next.Spec != nil {
-      panic("TODO") // TODO: turn this into an error
+      return nil, fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
     } else {
       next.Spec = sp
     }
@@ -460,7 +462,7 @@ func (sp *Spec) EnqueueTask (tk *Task) *Task {
   if sp.Tasks == nil {
     sp.Tasks = tk
     sp.tasks_enqueue_end = tk
-    return end
+    return end, nil
   }
 
   // If the end of the Task enqueue is undefined, initialize it.
@@ -469,11 +471,11 @@ func (sp *Spec) EnqueueTask (tk *Task) *Task {
     end.Next = sp.Tasks
     sp.Tasks = tk
     sp.tasks_enqueue_end = end
-    return end
+    return end, nil
   }
 
   sp.tasks_enqueue_end = sp.tasks_enqueue_end.insertRange(tk, end)
-  return end
+  return end, nil
 }
 
 
@@ -482,7 +484,7 @@ func (sp *Spec) EnqueueTask (tk *Task) *Task {
   function (`f`), enqueues it for execution in the task queue,
   and returns it.
 */
-func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) *Task {
+func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) (*Task, error) {
   return s.EnqueueTask(& Task {
     Name: name,
     Func: f,
@@ -495,7 +497,7 @@ func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) *Task {
   and asset map function (`f`), enqueues it for execution in the
   task queue, and returns it.
 */
-func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) *Task {
+func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) (*Task, error) {
   return s.EnqueueTask(& Task {
     Name: name,
     MapFunc: f,
@@ -510,7 +512,7 @@ func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) *Task {
   multiple tasks are inserted their order is maintained. Return
   the final inserted item.
 */
-func (sp *Spec) DeferTask (tk *Task) *Task {
+func (sp *Spec) DeferTask (tk *Task) (*Task, error) {
   sp.task_queue_lock.Lock()
   defer sp.task_queue_lock.Unlock()
 
@@ -524,7 +526,7 @@ func (sp *Spec) DeferTask (tk *Task) *Task {
     if next.Spec == sp {
       continue
     } else if next.Spec != nil {
-      panic("TODO") // TODO: turn this into an error
+      return nil, fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
     } else {
       next.Spec = sp
     }
@@ -539,14 +541,14 @@ func (sp *Spec) DeferTask (tk *Task) *Task {
   if sp.Tasks == nil {
     sp.Tasks = tk
     sp.tasks_enqueue_end = nil
-    return end
+    return end, nil
   }
 
   if sp.tasks_enqueue_end == nil {
     sp.tasks_enqueue_end = sp.Tasks.End()
   }
 
-  return sp.tasks_enqueue_end.insertRange(tk, end)
+  return sp.tasks_enqueue_end.insertRange(tk, end), nil
 }
 
 
@@ -555,7 +557,7 @@ func (sp *Spec) DeferTask (tk *Task) *Task {
   function (`f`), defers it for execution in the task queue,
   and returns it.
 */
-func (s *Spec) DeferTaskFunc (name string, f TaskFunc) *Task {
+func (s *Spec) DeferTaskFunc (name string, f TaskFunc) (*Task, error) {
   return s.DeferTask(& Task { Name: name, Func: f })
 }
 
@@ -565,7 +567,7 @@ func (s *Spec) DeferTaskFunc (name string, f TaskFunc) *Task {
   and asset map function (`f`), defers it for execution in the
   task queue, and returns it.
 */
-func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) *Task {
+func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) (*Task, error) {
   return s.DeferTask(& Task { Name: name, MapFunc: f })
 }
 
@@ -580,7 +582,7 @@ func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) *Task {
   next. This function returns the final inserted item in the push
   queue.
 */
-func (sp *Spec) PushTask (tk *Task) *Task {
+func (sp *Spec) PushTask (tk *Task) (*Task, error) {
   tk.Spec = sp
 
   // Find the end of the added tasks while
@@ -591,7 +593,7 @@ func (sp *Spec) PushTask (tk *Task) *Task {
     if next.Spec == sp {
       continue
     } else if next.Spec != nil {
-      panic("TODO") // TODO: turn this into an error
+      return nil, fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
     } else {
       next.Spec = sp
     }
@@ -600,11 +602,11 @@ func (sp *Spec) PushTask (tk *Task) *Task {
   if sp.tasks_push_queue == nil || sp.tasks_push_end == nil {
     sp.tasks_push_queue = tk
     sp.tasks_push_end   = end
-    return end
+    return end, nil
   }
 
   sp.tasks_push_end = sp.tasks_push_end.insertRange(tk, end)
-  return end
+  return end, nil
 }
 
 
@@ -613,7 +615,7 @@ func (sp *Spec) PushTask (tk *Task) *Task {
   function (`f`), pushs it for execution in the task queue,
   and returns it.
 */
-func (s *Spec) PushTaskFunc (name string, f TaskFunc) *Task {
+func (s *Spec) PushTaskFunc (name string, f TaskFunc) (*Task, error) {
   return s.PushTask(& Task { Name: name, Func: f })
 }
 
@@ -630,7 +632,7 @@ func (s *Spec) EnqueueTaskName (name string) (*Task, error) {
   if task == nil || err != nil {
     return nil, err
   }
-  return s.EnqueueTask(task), nil
+  return s.EnqueueTask(task)
 }
 
  
@@ -652,7 +654,7 @@ func (s *Spec) EnqueueUniqueTask (t *Task) (*Task, error) {
     return existing_task, nil
   }
 
-  return s.EnqueueTask(t), nil
+  return s.EnqueueTask(t)
 }
 
 

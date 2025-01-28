@@ -103,7 +103,7 @@ func (od *cliOutputDefinition) EnqueueTasks (name string, spec *Spec) (error) {
 
   // Enqueue a task to consume spec input and forward assets
   //
-  spec.EnqueueTaskFunc(name+"-consume", func (s *Spec, tk *Task) error {
+  _, err = spec.EnqueueTaskFunc(name+"-consume", func (s *Spec, tk *Task) error {
     if err := tk.ForwardAssets(); err != nil {
       return err
     }
@@ -118,6 +118,8 @@ func (od *cliOutputDefinition) EnqueueTasks (name string, spec *Spec) (error) {
       tk.EmitAsset(asset_chunk)
     }}
   })
+
+  if err != nil { return err }
 
   // Enqueue filter tasks
   //
@@ -145,10 +147,13 @@ func (od *cliOutputDefinition) EnqueueTasks (name string, spec *Spec) (error) {
       goto DONT_CLOSE
     }
 
-    var close_task = spec.DeferTaskFunc(name+"-close", func (*Spec, *Task) error {
+    var close_task *Task
+    close_task, err = spec.DeferTaskFunc(name+"-close", func (*Spec, *Task) error {
       closer.Close()
       return nil
     })
+
+    if err != nil { return err }
     close_task.IgnoreAssets = true
   }
   DONT_CLOSE:
