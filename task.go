@@ -429,59 +429,50 @@ func (s *Spec) GetTask (name string, spec *Spec) (*Task, error) {
 }
 
 
-func (s *Spec) NewTask (name string) *Task {
-  return & Task  {
-    Spec: s,
-    Name: name,
-  }
-}
-
-
-func (s *Spec) NewTaskFunc (name string, f TaskFunc) *Task {
-  return & Task {
-    Spec: s,
-    Name: name,
-    Func: f,
-  }
-}
-
-
-func (s *Spec) NewTaskMapFunc (name string, f TaskMapFunc) *Task {
-  return & Task {
-    Spec: s,
-    Name: name,
-    MapFunc: f,
-  }
-}
-
-
 /*
   Insert a task into the task queue, before deferred tasks.
   Enqueued tasks are executed in first-in, first-out order, like
   a queue. Return the final inserted item.
 */
-func (s *Spec) EnqueueTask (t *Task) *Task {
-  s.task_queue_lock.Lock()
-  defer s.task_queue_lock.Unlock()
+func (sp *Spec) EnqueueTask (tk *Task) *Task {
+  sp.task_queue_lock.Lock()
+  defer sp.task_queue_lock.Unlock()
 
-  t.Spec = s
+  tk.Spec = sp
 
-  end := t.End()
+  // Find the end of the added tasks while
+  // updating their Spec values.
+  //
+  var end = tk
+  for next := tk.Next; next != nil; end, next = next, next.Next {
+    if next.Spec == sp {
+      continue
+    } else if next.Spec != nil {
+      panic("TODO") // TODO: turn this into an error
+    } else {
+      next.Spec = sp
+    }
+  }
 
-  if s.Tasks == nil {
-    s.Tasks = t
-    s.tasks_enqueue_end = t
+  // If the Task queue is uninitialized, use this Task as the
+  // start of the task queue.
+  //
+  if sp.Tasks == nil {
+    sp.Tasks = tk
+    sp.tasks_enqueue_end = tk
     return end
   }
 
-  if s.tasks_enqueue_end == nil {
-    end.Next = s.Tasks
-    s.Tasks = t
-    s.tasks_enqueue_end = end
+  // If the end of the Task enqueue is undefined, initialize it.
+  //
+  if sp.tasks_enqueue_end == nil {
+    end.Next = sp.Tasks
+    sp.Tasks = tk
+    sp.tasks_enqueue_end = end
     return end
   }
 
-  s.tasks_enqueue_end = s.tasks_enqueue_end.insertRange(t, end)
+  sp.tasks_enqueue_end = sp.tasks_enqueue_end.insertRange(tk, end)
   return end
 }
 
@@ -492,7 +483,10 @@ func (s *Spec) EnqueueTask (t *Task) *Task {
   and returns it.
 */
 func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) *Task {
-  return s.EnqueueTask(s.NewTaskFunc(name, f))
+  return s.EnqueueTask(& Task {
+    Name: name,
+    Func: f,
+  })
 }
 
 
@@ -502,7 +496,10 @@ func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) *Task {
   task queue, and returns it.
 */
 func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) *Task {
-  return s.EnqueueTask(s.NewTaskMapFunc(name, f))
+  return s.EnqueueTask(& Task {
+    Name: name,
+    MapFunc: f,
+  })
 }
 
 
@@ -513,12 +510,25 @@ func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) *Task {
   multiple tasks are inserted their order is maintained. Return
   the final inserted item.
 */
-func (s *Spec) DeferTask (t *Task) *Task {
-  s.task_queue_lock.Lock()
-  defer s.task_queue_lock.Unlock()
+func (sp *Spec) DeferTask (tk *Task) *Task {
+  sp.task_queue_lock.Lock()
+  defer sp.task_queue_lock.Unlock()
 
-  end := t.End()
-  t.Spec = s
+  tk.Spec = sp
+
+  // Find the end of the added tasks while
+  // updating their Spec values.
+  //
+  var end = tk
+  for next := tk.Next; next != nil; end, next = next, next.Next {
+    if next.Spec == sp {
+      continue
+    } else if next.Spec != nil {
+      panic("TODO") // TODO: turn this into an error
+    } else {
+      next.Spec = sp
+    }
+  }
 
   // If the spec tasks list is not yet defined, enqueued tasks
   // should still be executed before deferred tasks, so define
@@ -526,17 +536,17 @@ func (s *Spec) DeferTask (t *Task) *Task {
   // point. This will cause enqueuing to insert into the top of
   // the task list.
   //
-  if s.Tasks == nil {
-    s.Tasks = t
-    s.tasks_enqueue_end = nil
+  if sp.Tasks == nil {
+    sp.Tasks = tk
+    sp.tasks_enqueue_end = nil
     return end
   }
 
-  if s.tasks_enqueue_end == nil {
-    s.tasks_enqueue_end = s.Tasks.End()
+  if sp.tasks_enqueue_end == nil {
+    sp.tasks_enqueue_end = sp.Tasks.End()
   }
 
-  return s.tasks_enqueue_end.insertRange(t, end)
+  return sp.tasks_enqueue_end.insertRange(tk, end)
 }
 
 
@@ -546,7 +556,7 @@ func (s *Spec) DeferTask (t *Task) *Task {
   and returns it.
 */
 func (s *Spec) DeferTaskFunc (name string, f TaskFunc) *Task {
-  return s.DeferTask(s.NewTaskFunc(name, f))
+  return s.DeferTask(& Task { Name: name, Func: f })
 }
 
 
@@ -556,7 +566,7 @@ func (s *Spec) DeferTaskFunc (name string, f TaskFunc) *Task {
   task queue, and returns it.
 */
 func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) *Task {
-  return s.DeferTask(s.NewTaskMapFunc(name, f))
+  return s.DeferTask(& Task { Name: name, MapFunc: f })
 }
 
 
@@ -570,17 +580,30 @@ func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) *Task {
   next. This function returns the final inserted item in the push
   queue.
 */
-func (s *Spec) PushTask (t *Task) *Task {
-  end := t.End()
-  t.Spec = s
+func (sp *Spec) PushTask (tk *Task) *Task {
+  tk.Spec = sp
 
-  if s.tasks_push_queue == nil || s.tasks_push_end == nil {
-    s.tasks_push_queue = t
-    s.tasks_push_end   = end
+  // Find the end of the added tasks while
+  // updating their Spec values.
+  //
+  var end = tk
+  for next := tk.Next; next != nil; end, next = next, next.Next {
+    if next.Spec == sp {
+      continue
+    } else if next.Spec != nil {
+      panic("TODO") // TODO: turn this into an error
+    } else {
+      next.Spec = sp
+    }
+  }
+
+  if sp.tasks_push_queue == nil || sp.tasks_push_end == nil {
+    sp.tasks_push_queue = tk
+    sp.tasks_push_end   = end
     return end
   }
 
-  s.tasks_push_end = s.tasks_push_end.insertRange(t, end)
+  sp.tasks_push_end = sp.tasks_push_end.insertRange(tk, end)
   return end
 }
 
@@ -591,7 +614,7 @@ func (s *Spec) PushTask (t *Task) *Task {
   and returns it.
 */
 func (s *Spec) PushTaskFunc (name string, f TaskFunc) *Task {
-  return s.PushTask(s.NewTaskFunc(name, f))
+  return s.PushTask(& Task { Name: name, Func: f })
 }
 
 

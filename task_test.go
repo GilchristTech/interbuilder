@@ -175,8 +175,6 @@ func TestSpecGetTask (t *testing.T) {
 
 
 func TestSpecTaskQueue (t *testing.T) {
-  // TODO: add a task which modifies the task queue, instead of the order of tasks being mostly evaluated prior to task execution.
-
   var root *Spec = NewSpec("root", nil)
   root.Props["quiet"] = true
 
@@ -190,8 +188,22 @@ func TestSpecTaskQueue (t *testing.T) {
   // function.
   //
   var task_log []string
-  var task_func = func (s *Spec, tk *Task) error {
-    task_log = append(task_log, tk.Name)
+  var task_func = func (sp *Spec, tk *Task) error {
+    var task_name = tk.Name
+
+    // Ensure Task queue and Specs are properly defined
+
+    if sp == nil {
+      t.Errorf("Task with name %s has a nil Spec argument", task_name)
+    }
+
+    if tk.Spec == nil {
+      t.Errorf("Task with name %s has a nil Spec property", task_name)
+    } else if sp != tk.Spec {
+      t.Errorf("Task with name %s's Spec function argument and Spec struct property are not equal", task_name)
+    }
+
+    task_log = append(task_log, task_name)
     return nil
   }
 
@@ -202,17 +214,30 @@ func TestSpecTaskQueue (t *testing.T) {
   root.DeferTaskFunc("task_x", task_func)
   root.EnqueueTaskFunc("task_p", task_func)
 
-  var task_a = root.NewTaskFunc("task_a", task_func)
-  task_a.Append( root.NewTaskFunc("task_b", task_func) )
-  task_a.Append( root.NewTaskFunc("task_c", task_func) )
+  var task_a =   & Task { Name: "task_a", Func: task_func }
+  task_a.Append( & Task { Name: "task_b", Func: task_func } )
+  task_a.Append( & Task { Name: "task_c", Func: task_func } )
   root.PushTask(task_a)
   root.PushTaskFunc("task_d", task_func)
+
+  // Add a task which modifies the task queue during execution
+
+  root.PushTaskFunc("task_e", func (sp *Spec, tk *Task) error {
+    if err := task_func(sp, tk); err != nil {
+      return err
+    }
+
+    root.PushTaskFunc("task_f", task_func)
+    return nil
+  })
+
+  root.PushTaskFunc("task_g", task_func)
 
   if err := root.Run(); err != nil {
     t.Fatal(err)
   }
 
-  if got, expect := len(task_log), 10; got != expect {
+  if got, expect := len(task_log), 13; got != expect {
     t.Errorf("Expected %d tasks in the task log, got %d", expect, got)
   }
 
@@ -387,7 +412,7 @@ func TestTaskEmitAsset (t *testing.T) {
     // Decode the test case's task sequence into tasks in the task queue
     //
     for _, char := range test_case.Tasks {
-      var task *Task = spec.NewTask("")
+      var task = & Task {}
       switch char {
       case '0':
         task.Name    = "empty"
