@@ -191,10 +191,11 @@ var TaskResolverAssetsInferCss = TaskResolver {
 
   TaskPrototype: Task {
     MatchMimePrefix: "text/css",
+    Mask: TASK_TASKS_QUEUE,
 
     Func: func (s *Spec, tk *Task) error {
-      s.EnqueueTaskName("apply-path-transformations-css")
-      return nil
+      _, err := tk.EnqueueTaskName("apply-path-transformations-css")
+      return err
     },
   },
 }

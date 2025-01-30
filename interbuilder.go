@@ -44,6 +44,8 @@ type Spec struct {
 
   TaskResolvers   *TaskResolver
 
+  Running bool
+
   Tasks              *Task
   CurrentTask        *Task
   tasks_enqueue_end  *Task
@@ -159,10 +161,12 @@ func (s *Spec) AddOutputSpec (o *Spec) {
 }
 
 
-func (s *Spec) Done () {
-  for _, output_group := range s.OutputGroups {
+func (sp *Spec) Done () {
+  for _, output_group := range sp.OutputGroups {
     output_group.Done()
   }
+
+  sp.Running = false
 }
 
 
@@ -185,6 +189,16 @@ func (s *Spec) Println (a ...any) (n int, err error) {
 
 
 func (s *Spec) Run () error {
+  // Only run the Spec if is not already running.
+  //
+  s.task_queue_lock.Lock()
+  if s.Running {
+    s.task_queue_lock.Unlock()
+    return fmt.Errorf("Spec with name \"%s\" is already running", s.Name)
+  }
+  s.Running = true
+  s.task_queue_lock.Unlock()
+
   s.Printf("[%s] Running\n", s.Name)
   defer s.Printf("[%s] Exit\n", s.Name)
   defer s.Done()

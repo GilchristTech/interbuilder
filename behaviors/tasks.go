@@ -67,6 +67,8 @@ var TaskResolverInferSource = TaskResolver {
   Children:  &TaskResolverInferSourceNodeJS,
 
   TaskPrototype: Task {
+    Mask: TASK_TASKS_QUEUE,
+
     Func: func (spec *Spec, task *Task) error {
       tr, err := task.Resolver.MatchChildren(task.Name, spec)
       if err != nil {
@@ -79,8 +81,7 @@ var TaskResolverInferSource = TaskResolver {
         return nil
       }
 
-      spec.EnqueueTask(tr.NewTask())
-      return nil
+      return task.EnqueueTask(tr.NewTask())
     },
   },
 }
@@ -89,14 +90,14 @@ var TaskResolverInferSource = TaskResolver {
 var TaskResolverInferSourceNodeJS = TaskResolver {
   Id:   "source-infer-nodejs",
   Name: "source-infer",
-  MatchFunc: func (name string, spec *Spec) (bool, error) {
-    return spec.PathExists("package.json")
+  MatchFunc: func (name string, sp *Spec) (bool, error) {
+    return sp.PathExists("package.json")
   },
   TaskPrototype: Task {
-    Func: func (spec *Spec, task *Task) error {
-      if _, e := spec.EnqueueTaskName("source-install-nodejs"); e != nil { return e }
-      if _, e := spec.EnqueueTaskName("source-build-nodejs");   e != nil { return e }
-      if _, e := spec.EnqueueTaskName("assets-infer");          e != nil { return e }
+    Func: func (sp *Spec, tk *Task) error {
+      if _, e := tk.EnqueueTaskName("source-install-nodejs"); e != nil { return e }
+      if _, e := tk.EnqueueTaskName("source-build-nodejs");   e != nil { return e }
+      if _, e := tk.EnqueueTaskName("assets-infer");          e != nil { return e }
       return nil
     },
   },
@@ -146,7 +147,7 @@ var TaskResolverSourceBuildNodeJS = TaskResolver {
 }
 
 
-func TaskSourceBuildNodeJS (spec *Spec, task *Task) error {
+func TaskSourceBuildNodeJS (sp *Spec, tk *Task) error {
   // Check if build path already exists and emit it, if so
   //
 
@@ -159,14 +160,14 @@ func TaskSourceBuildNodeJS (spec *Spec, task *Task) error {
   }
 
   for _, path := range check_paths {
-    if dist_exists, err := spec.PathExists(path); err != nil {
+    if dist_exists, err := sp.PathExists(path); err != nil {
       return err
 
     } else if dist_exists {
-      dist_asset, err := spec.MakeFileKeyAsset(path, "/")
+      dist_asset, err := sp.MakeFileKeyAsset(path, "/")
       if err != nil { return err }
 
-      err = task.EmitAsset(dist_asset)
+      err = tk.EmitAsset(dist_asset)
       if err != nil { return err }
       return nil
     }
@@ -174,28 +175,28 @@ func TaskSourceBuildNodeJS (spec *Spec, task *Task) error {
 
   // Run build command
   //
-  _, err := task.CommandRun("npm", "run", "build")
-  if err != nil { return err }
+  if _, err := tk.CommandRun("npm", "run", "build"); err != nil {
+    return err
+  }
 
   // TODO: emit @emit assets
 
   for _, path := range check_paths {
-    if dist_exists, err := spec.PathExists(path); err != nil {
+    if dist_exists, err := sp.PathExists(path); err != nil {
       return err
 
     } else if dist_exists {
-      dist_asset, err := spec.MakeFileKeyAsset(path, "/")
+      dist_asset, err := sp.MakeFileKeyAsset(path, "/")
       if err != nil { return err }
 
-      err = task.EmitAsset(dist_asset)
+      err = tk.EmitAsset(dist_asset)
       if err != nil { return err }
       return nil
     }
   }
 
-  spec.EnqueueTaskName("infer-assets")
-
-  return nil
+  _, err := tk.EnqueueTaskName("infer-assets")
+  return err
 }
 
 

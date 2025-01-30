@@ -227,8 +227,7 @@ func TestSpecTaskQueue (t *testing.T) {
       return err
     }
 
-    root.PushTaskFunc("task_f", task_func)
-    return nil
+    return tk.PushTaskFunc("task_f", task_func)
   })
 
   root.PushTaskFunc("task_g", task_func)
@@ -630,14 +629,19 @@ func TestTaskEmitMultiAsset (t *testing.T) {
   }
 
 
+  TEST_CASES:
   for test_case_i, test_case := range test_cases {
     var root = NewSpec("root", nil)
     var spec = root.AddSubspec(NewSpec("spec", nil))
+    root.Props["quiet"] = true
 
     // Generate the task queue
     //
     for _, task_resolver := range test_case.Tasks {
-      spec.EnqueueTask(task_resolver.NewTask())
+      if err := spec.EnqueueTask(task_resolver.NewTask()); err != nil {
+        t.Errorf("Error constructing task queue in test case %d: %v", test_case_i, err)
+        continue TEST_CASES
+      }
     }
 
     // Consume spec output and assert the test case's conditions

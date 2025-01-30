@@ -120,10 +120,13 @@ func BuildTaskSourceGitClone (s *Spec) error {
   var is_git_file   bool = strings.HasSuffix(source.Path, ".git") // TODO: suppose this is a URL with form parameters; this would not pick up such a case
 
   if ( is_git_scheme || is_github || is_git_file ){
-    _, err := s.EnqueueUniqueTaskName("git-clone")
-    if err != nil { return err }
-    _, err  = s.EnqueueUniqueTaskName("source-infer")
-    if err != nil { return err }
+    if _, err := s.EnqueueUniqueTaskName("git-clone"); err != nil {
+      return err
+    }
+
+    if _, err := s.EnqueueUniqueTaskName("source-infer"); err != nil {
+      return err
+    }
   }
 
   return nil

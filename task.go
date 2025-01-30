@@ -435,11 +435,11 @@ func (s *Spec) GetTask (name string, spec *Spec) (*Task, error) {
   Insert a task into the task queue, before deferred tasks.
   Enqueued tasks are executed in first-in, first-out order, like
   a queue.
-*/
-func (sp *Spec) EnqueueTask (tk *Task) error {
-  sp.task_queue_lock.Lock()
-  defer sp.task_queue_lock.Unlock()
 
+  This method can execute during Spec execution, and does not
+  lock the task queue.
+*/
+func (sp *Spec) enqueueTaskUnsafe (tk *Task) error {
   tk.Spec = sp
 
   // Find the end of the added tasks while
@@ -450,7 +450,10 @@ func (sp *Spec) EnqueueTask (tk *Task) error {
     if next.Spec == sp {
       continue
     } else if next.Spec != nil {
-      return fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
+      return fmt.Errorf(
+        "Cannot add this Task to Spec with name '%s', it already has a Spec defined with name '%s'",
+        sp.Name, next.Spec.Name,
+      )
     } else {
       next.Spec = sp
     }
@@ -480,26 +483,48 @@ func (sp *Spec) EnqueueTask (tk *Task) error {
 
 
 /*
-  EnqueueTaskFunc creates a new Task with the specified name and
-  function (`f`), enqueues it for execution in the task queue.
+  Insert a task into the task queue, before deferred tasks.
+  Enqueued tasks are executed in first-in, first-out order, like
+  a queue.
+
+  This method is meant to construct a Task queue prior to running
+  the Spec. Because of this, it returns an error if the Spec is
+  running. In order to modify the Task queue during execution,
+  use Task.EnqueueTask.
 */
-func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) error {
-  return s.EnqueueTask(& Task {
+func (sp *Spec) EnqueueTask (tk *Task) error {
+  sp.task_queue_lock.Lock()
+  defer sp.task_queue_lock.Unlock()
+
+  if sp.Running {
+    return fmt.Errorf("Spec \"%s\" cannot enqueue tasks while it is running", sp.Name)
+  }
+
+  return sp.enqueueTaskUnsafe(tk)
+}
+
+
+/*
+  EnqueueTaskFunc creates a new Task with the specified name and
+  function (`fn`), enqueues it for execution in the task queue.
+*/
+func (sp *Spec) EnqueueTaskFunc (name string, fn TaskFunc) error {
+  return sp.EnqueueTask(& Task {
     Name: name,
-    Func: f,
+    Func: fn,
   })
 }
 
 
 /*
   EnqueueTaskMapFunc creates a new Task with the specified name
-  and asset map function (`f`), enqueues it for execution in the
+  and asset map function (`fn`), enqueues it for execution in the
   task queue.
 */
-func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) error {
-  return s.EnqueueTask(& Task {
+func (sp *Spec) EnqueueTaskMapFunc (name string, fn TaskMapFunc) error {
+  return sp.EnqueueTask(& Task {
     Name: name,
-    MapFunc: f,
+    MapFunc: fn,
   })
 }
 
@@ -509,11 +534,11 @@ func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) error {
   the enqueue end point. These tasks are executed in first-in,
   last-out order relative to other tasks in the queue, but if
   multiple tasks are inserted their order is maintained.
-*/
-func (sp *Spec) DeferTask (tk *Task) error {
-  sp.task_queue_lock.Lock()
-  defer sp.task_queue_lock.Unlock()
 
+  This method can execute during Spec execution, and does not
+  lock the task queue.
+*/
+func (sp *Spec) deferTaskUnsafe (tk *Task) error {
   tk.Spec = sp
 
   // Find the end of the added tasks while
@@ -552,23 +577,45 @@ func (sp *Spec) DeferTask (tk *Task) error {
 
 
 /*
-  DeferTaskFunc creates a new Task with the specified name and
-  function (`f`), defers it for execution in the task queue.
+  Insert a task into the task queue, directly after the end of
+  the enqueue end point. These tasks are executed in first-in,
+  last-out order relative to other tasks in the queue, but if
+  multiple tasks are inserted their order is maintained.
+
+  This method is meant to construct a Task queue prior to running
+  the Spec. Because of this, it returns an error if the Spec is
+  running. In order to modify the Task queue during execution,
+  use Task.DeferTask.
 */
-func (s *Spec) DeferTaskFunc (name string, f TaskFunc) error {
-  return s.DeferTask(& Task { Name: name, Func: f })
+func (sp *Spec) DeferTask (tk *Task) error {
+  sp.task_queue_lock.Lock()
+  defer sp.task_queue_lock.Unlock()
+
+  if sp.Running {
+    return fmt.Errorf("Spec \"%s\" cannot defer tasks while it is running", sp.Name)
+  }
+
+  return sp.deferTaskUnsafe(tk)
+}
+
+
+/*
+  DeferTaskFunc creates a new Task with the specified name and
+  function (`fn`), defers it for execution in the task queue.
+*/
+func (sp *Spec) DeferTaskFunc (name string, fn TaskFunc) error {
+  return sp.DeferTask(& Task { Name: name, Func: fn })
 }
 
 
 /*
   DeferTaskMapFunc creates a new Task with the specified name
-  and asset map function (`f`), defers it for execution in the
+  and asset map function (`fn`), defers it for execution in the
   task queue, and returns it.
 */
-func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) error {
-  return s.DeferTask(& Task { Name: name, MapFunc: f })
+func (sp *Spec) DeferTaskMapFunc (name string, fn TaskMapFunc) error {
+  return sp.DeferTask(& Task { Name: name, MapFunc: fn })
 }
-
 
 
 /*
@@ -578,8 +625,11 @@ func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) error {
   execution loop begins, and after each tasks, all tasks in the
   push queue are flushed into the main task queue to be executed
   next.
+
+  This method can execute during Spec execution, and does not
+  lock the task queue.
 */
-func (sp *Spec) PushTask (tk *Task) error {
+func (sp *Spec) pushTaskUnsafe (tk *Task) error {
   tk.Spec = sp
 
   // Find the end of the added tasks while
@@ -608,11 +658,36 @@ func (sp *Spec) PushTask (tk *Task) error {
 
 
 /*
+  PushTask adds a Task to the push queue. The push queue is a
+  temporary holding area for tasks that need to be executed
+  immediately before other tasks in the main queue. When the task
+  execution loop begins, and after each tasks, all tasks in the
+  push queue are flushed into the main task queue to be executed
+  next.
+
+  This method is meant to construct a Task queue prior to running
+  the Spec. Because of this, it returns an error if the Spec is
+  running. In order to modify the Task queue during execution,
+  use Task.PushTask.
+*/
+func (sp *Spec) PushTask (tk *Task) error {
+  sp.task_queue_lock.Lock()
+  defer sp.task_queue_lock.Unlock()
+
+  if sp.Running {
+    return fmt.Errorf("Spec \"%s\" cannot push tasks while it is running", sp.Name)
+  }
+
+  return sp.pushTaskUnsafe(tk)
+}
+
+
+/*
   PushTaskFunc creates a new Task with the specified name and
   function (`f`), pushs it for execution in the task queue
 */
-func (s *Spec) PushTaskFunc (name string, f TaskFunc) error {
-  return s.PushTask(& Task { Name: name, Func: f })
+func (sp *Spec) PushTaskFunc (name string, fn TaskFunc) error {
+  return sp.PushTask(& Task { Name: name, Func: fn })
 }
 
 
@@ -623,12 +698,12 @@ func (s *Spec) PushTaskFunc (name string, f TaskFunc) error {
   cannot be found, it is returned as nil. If an error occurs, an
   error is returned.
 */
-func (s *Spec) EnqueueTaskName (name string) (*Task, error) {
-  task, err := s.GetTask(name, s)
+func (sp *Spec) EnqueueTaskName (name string) (*Task, error) {
+  task, err := sp.GetTask(name, sp)
   if task == nil || err != nil {
     return nil, err
   }
-  return task, s.EnqueueTask(task)
+  return task, sp.EnqueueTask(task)
 }
 
  
@@ -639,18 +714,17 @@ func (s *Spec) EnqueueTaskName (name string) (*Task, error) {
   modifying the task queue. Otherwise, it enqueues the provided
   task and returns the final enqueued Task.
 */
-func (s *Spec) EnqueueUniqueTask (t *Task) (*Task, error) {
-  if t.Name == "" {
+func (sp *Spec) EnqueueUniqueTask (tk *Task) (*Task, error) {
+  if tk.Name == "" {
     return nil, fmt.Errorf("EnqueueUniqueTask error: task's name is empty")
   }
 
-  // TODO: check the push queue for matching tasks
-  existing_task := s.GetTaskFromQueue(t.Name)
+  existing_task := sp.GetTaskFromQueue(tk.Name)
   if existing_task != nil {
     return existing_task, nil
   }
 
-  return t, s.EnqueueTask(t)
+  return tk, sp.EnqueueTask(tk)
 }
 
 
@@ -660,12 +734,12 @@ func (s *Spec) EnqueueUniqueTask (t *Task) (*Task, error) {
   the same name already exists, it returns the existing task without
   enqueuing a new one.
 */
-func (s *Spec) EnqueueUniqueTaskName (name string) (*Task, error) {
-  existing_task := s.GetTaskFromQueue(name)
+func (sp *Spec) EnqueueUniqueTaskName (name string) (*Task, error) {
+  existing_task := sp.GetTaskFromQueue(name)
   if existing_task != nil {
     return existing_task, nil
   }
-  return s.EnqueueTaskName(name)
+  return sp.EnqueueTaskName(name)
 }
 
 
@@ -674,9 +748,9 @@ func (s *Spec) EnqueueUniqueTaskName (name string) (*Task, error) {
   the specified name and returns it. If no such task is found, it
   returns nil.
 */
-func (s *Spec) GetTaskFromQueue (name string) *Task {
-  // TODO: check the push queue
-  for task := s.Tasks ; task != nil ; task = task.Next {
+func (sp *Spec) GetTaskFromQueue (name string) *Task {
+  // TODO: check the push queue for matching tasks
+  for task := sp.Tasks ; task != nil ; task = task.Next {
     if task.Name == name {
       return task
     }
@@ -744,6 +818,7 @@ func (tk *Task) EmitAsset (a *Asset) error {
   for next = tk.Next; next != nil; next = next.Next {
     if (!next.IgnoreAssets                                     &&
         next.Mask == 0                                         ||
+        next.Mask & TASK_TASKS_QUEUE    == TASK_TASKS_QUEUE    ||
         next.Mask & TASK_ASSETS_CONSUME == TASK_ASSETS_CONSUME ){
       break
     }
@@ -1003,4 +1078,146 @@ func (tr *TaskResolver) MatchChildrenWithAsset (a *Asset) (*TaskResolver, error)
     }
   }
   return nil, nil
+}
+
+
+/*
+  AssertTaskQueue returns an error if this task is unable to
+  modify the task queue, either due to an undefined Spec or
+  because of Task.Mask permission issues.
+*/
+func (tk *Task) AssertTaskQueue () error {
+  var spec = tk.Spec
+
+  if spec == nil {
+    return fmt.Errorf("Task with name '%s' cannot modify the task queue, Spec is nil", tk.Name)
+  }
+
+  if tk.Mask != 0 && tk.Mask & TASK_TASKS_QUEUE != TASK_TASKS_QUEUE {
+    return fmt.Errorf("Task with name '%s' in spec '%s' cannot modify task queue, Task.Mask has a value of %O", tk.Name, spec.Name, tk.Mask)
+  }
+
+  return nil
+}
+
+
+func (tk *Task) DeferTask (task *Task) error {
+  if err := tk.AssertTaskQueue(); err != nil {
+    return err
+  }
+  var spec = tk.Spec
+  spec.task_queue_lock.Lock()
+  defer spec.task_queue_lock.Unlock()
+  return spec.deferTaskUnsafe(task)
+}
+
+
+func (tk *Task) DeferTaskFunc (name string, fn TaskFunc) error {
+  return tk.DeferTask(& Task {
+    Name: name,
+    Func: fn,
+  })
+}
+
+
+func (tk *Task) DeferTaskMapFunc (name string, fn TaskMapFunc) error {
+  return tk.DeferTask(& Task {
+    Name: name,
+    MapFunc: fn,
+  })
+}
+
+
+func (tk *Task) EnqueueTask (task *Task) error {
+  if err := tk.AssertTaskQueue(); err != nil {
+    return err
+  }
+  var spec = tk.Spec
+  spec.task_queue_lock.Lock()
+  defer spec.task_queue_lock.Unlock()
+  return spec.enqueueTaskUnsafe(task)
+}
+
+
+func (tk *Task) EnqueueTaskFunc (name string, fn TaskFunc) error {
+  return tk.EnqueueTask(& Task {
+    Name: name,
+    Func: fn,
+  })
+}
+
+
+func (tk *Task) EnqueueTaskMapFunc (name string, fn TaskMapFunc) error {
+  if name == "" {
+    return fmt.Errorf("EnqueueUniqueTask error: task's name is empty")
+  }
+
+  return tk.EnqueueTask(& Task {
+    Name: name,
+    MapFunc: fn,
+  })
+}
+
+
+func (tk *Task) EnqueueTaskName (name string) (*Task, error) {
+  if tk.Spec == nil {
+    return nil, fmt.Errorf("Task with name '%s' cannot modify the task queue, Spec is nil", tk.Name)
+  }
+
+  task, err := tk.Spec.GetTask(name, tk.Spec)
+  if task == nil || err != nil {
+    return nil, err
+  }
+  return task, tk.EnqueueTask(task)
+}
+
+
+func (tk *Task) EnqueueUniqueTask (task *Task) (*Task, error) {
+  if tk.Spec == nil {
+    return nil, fmt.Errorf("Task with name '%s' cannot modify the task queue, Spec is nil", tk.Name)
+  }
+
+  if task.Name == "" {
+    return nil, fmt.Errorf("EnqueueUniqueTask error: task's name is empty")
+  }
+
+  existing_task := tk.Spec.GetTaskFromQueue(task.Name)
+  if existing_task != nil {
+    return existing_task, nil
+  }
+
+  return task, tk.EnqueueTask(tk)
+}
+
+
+func (tk *Task) EnqueueUniqueTaskName (name string) (*Task, error) {
+  if tk.Spec == nil {
+    return nil, fmt.Errorf("Task with name '%s' cannot modify the task queue, Spec is nil", tk.Name)
+  }
+
+  existing_task := tk.Spec.GetTaskFromQueue(name)
+  if existing_task != nil {
+    return existing_task, nil
+  }
+  return tk.EnqueueTaskName(name)
+}
+
+
+
+func (tk *Task) PushTask (task *Task) error {
+  if err := tk.AssertTaskQueue(); err != nil {
+    return err
+  }
+  var spec = tk.Spec
+  spec.task_queue_lock.Lock()
+  defer spec.task_queue_lock.Unlock()
+  return spec.pushTaskUnsafe(task)
+}
+
+
+func (tk *Task) PushTaskFunc (name string, fn TaskFunc) error {
+  return tk.PushTask(& Task {
+    Name: name,
+    Func: fn,
+  })
 }

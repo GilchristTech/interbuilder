@@ -23,15 +23,15 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
 
   // Produce assets
   //
-  spec.EnqueueTaskFunc("produce-assets", func (s *Spec, tk *Task) error {
-    asset_txt := s.MakeAsset("file.txt")
+  spec.EnqueueTaskFunc("produce-assets", func (sp *Spec, tk *Task) error {
+    asset_txt := sp.MakeAsset("file.txt")
     asset_txt.Mimetype = "text/plain"
     asset_txt.SetContentBytes([]byte("unmodified/path"))
     if err := tk.EmitAsset(asset_txt); err != nil {
       return nil
     }
 
-    asset_html := s.MakeAsset("index.html")
+    asset_html := sp.MakeAsset("index.html")
     asset_html.Mimetype = "text/html"
     asset_html.SetContentBytes([]byte(`
       <!DOCTYPE html>
@@ -52,8 +52,7 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
 
   // Enqueue assets-infer task
   //
-  infer_task, err := spec.EnqueueTaskName("assets-infer")
-  if err != nil {
+  if infer_task, err := spec.EnqueueTaskName("assets-infer"); err != nil {
     t.Log(SprintSpec(root))
     t.Fatalf("Error while enqueuing task with name \"assets-infer\": %v", err)
   } else if infer_task == nil {

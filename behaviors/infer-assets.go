@@ -12,6 +12,7 @@ var TaskResolverAssetsInferRoot = TaskResolver {
   MatchBlocks: true,
   TaskPrototype: Task {
     Func: TaskAssetsInferRoot,
+    Mask: TASK_TASKS_QUEUE | TASK_ASSETS_GENERATE | TASK_ASSETS_MUTATE,
   },
 }
 
@@ -104,6 +105,7 @@ func TaskAssetsInferRoot (spec *Spec, tk *Task) error {
 
       tk.Println("Match, running subtask:", matched_resolver.Id)
       new_subtask := matched_resolver.NewTask()
+      new_subtask.Spec = spec
       if err := new_subtask.Run(spec); err != nil {
         return fmt.Errorf("Error while asset inference is building the task queue: %w", err)
       }
