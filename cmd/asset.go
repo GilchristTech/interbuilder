@@ -393,11 +393,15 @@ var cmd_assets = & cobra.Command {
       })
 
       if closer != nil {
-        close_task, err := input_spec.DeferTaskFunc(spec_name + "-read-assets-close", func (*Spec, *Task) error {
-          return closer.Close()
-        })
+        var close_task = & Task {
+          Name: spec_name + "read-assets-close",
+          IgnoreAssets: true,
+          Func: func (*Spec, *Task) error {
+            return closer.Close()
+          },
+        }
 
-        if err != nil {
+        if err := input_spec.DeferTask(close_task); err != nil {
           fmt.Println("Error while deferring CLI read-assets-close task queue in Spec with name \"%s\":\n%v", spec_name, err)
           os.Exit(1)
         }

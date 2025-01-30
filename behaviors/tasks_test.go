@@ -91,7 +91,9 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
     t.Fatal("Could not build root spec:", err)
   }
 
-  node_spec.EnqueueTaskName("source-infer")
+  if _, err := node_spec.EnqueueTaskName("source-infer"); err != nil {
+    t.Fatal(err)
+  }
 
   // Run a task to assert the content of the files emitted by the
   // Node build Spec.
@@ -169,7 +171,9 @@ func TestTaskConsumeLinkFilesSingularFiles (t *testing.T) {
     return nil
   })
 
-  root.EnqueueTaskFunc("root-consume", TaskConsumeLinkFiles)
+  if err := root.EnqueueTaskFunc("root-consume", TaskConsumeLinkFiles); err != nil {
+    t.Fatal(err)
+  }
 
   TestWrapTimeoutError(t, root.Run)
 
@@ -242,8 +246,8 @@ func TestTaskConsumeLinkFilesWithPathTransformations (t *testing.T) {
     return s.EmitFileKey("/")
   }
 
-  producer_a.EnqueueTaskFunc("produce", produce_func)
-  producer_b.EnqueueTaskFunc("produce", produce_func)
+  if err := producer_a.EnqueueTaskFunc("produce", produce_func); err != nil { t.Fatal(err) }
+  if err := producer_b.EnqueueTaskFunc("produce", produce_func); err != nil { t.Fatal(err) }
 
   // Consumer
   //

@@ -434,9 +434,9 @@ func (s *Spec) GetTask (name string, spec *Spec) (*Task, error) {
 /*
   Insert a task into the task queue, before deferred tasks.
   Enqueued tasks are executed in first-in, first-out order, like
-  a queue. Return the final inserted item.
+  a queue.
 */
-func (sp *Spec) EnqueueTask (tk *Task) (*Task, error) {
+func (sp *Spec) EnqueueTask (tk *Task) error {
   sp.task_queue_lock.Lock()
   defer sp.task_queue_lock.Unlock()
 
@@ -450,7 +450,7 @@ func (sp *Spec) EnqueueTask (tk *Task) (*Task, error) {
     if next.Spec == sp {
       continue
     } else if next.Spec != nil {
-      return nil, fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
+      return fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
     } else {
       next.Spec = sp
     }
@@ -462,7 +462,7 @@ func (sp *Spec) EnqueueTask (tk *Task) (*Task, error) {
   if sp.Tasks == nil {
     sp.Tasks = tk
     sp.tasks_enqueue_end = tk
-    return end, nil
+    return nil
   }
 
   // If the end of the Task enqueue is undefined, initialize it.
@@ -471,20 +471,19 @@ func (sp *Spec) EnqueueTask (tk *Task) (*Task, error) {
     end.Next = sp.Tasks
     sp.Tasks = tk
     sp.tasks_enqueue_end = end
-    return end, nil
+    return nil
   }
 
   sp.tasks_enqueue_end = sp.tasks_enqueue_end.insertRange(tk, end)
-  return end, nil
+  return nil
 }
 
 
 /*
   EnqueueTaskFunc creates a new Task with the specified name and
-  function (`f`), enqueues it for execution in the task queue,
-  and returns it.
+  function (`f`), enqueues it for execution in the task queue.
 */
-func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) (*Task, error) {
+func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) error {
   return s.EnqueueTask(& Task {
     Name: name,
     Func: f,
@@ -495,9 +494,9 @@ func (s *Spec) EnqueueTaskFunc (name string, f TaskFunc) (*Task, error) {
 /*
   EnqueueTaskMapFunc creates a new Task with the specified name
   and asset map function (`f`), enqueues it for execution in the
-  task queue, and returns it.
+  task queue.
 */
-func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) (*Task, error) {
+func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) error {
   return s.EnqueueTask(& Task {
     Name: name,
     MapFunc: f,
@@ -509,10 +508,9 @@ func (s *Spec) EnqueueTaskMapFunc (name string, f TaskMapFunc) (*Task, error) {
   Insert a task into the task queue, directly after the end of
   the enqueue end point. These tasks are executed in first-in,
   last-out order relative to other tasks in the queue, but if
-  multiple tasks are inserted their order is maintained. Return
-  the final inserted item.
+  multiple tasks are inserted their order is maintained.
 */
-func (sp *Spec) DeferTask (tk *Task) (*Task, error) {
+func (sp *Spec) DeferTask (tk *Task) error {
   sp.task_queue_lock.Lock()
   defer sp.task_queue_lock.Unlock()
 
@@ -526,7 +524,7 @@ func (sp *Spec) DeferTask (tk *Task) (*Task, error) {
     if next.Spec == sp {
       continue
     } else if next.Spec != nil {
-      return nil, fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
+      return fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
     } else {
       next.Spec = sp
     }
@@ -541,23 +539,23 @@ func (sp *Spec) DeferTask (tk *Task) (*Task, error) {
   if sp.Tasks == nil {
     sp.Tasks = tk
     sp.tasks_enqueue_end = nil
-    return end, nil
+    return nil
   }
 
   if sp.tasks_enqueue_end == nil {
     sp.tasks_enqueue_end = sp.Tasks.End()
   }
 
-  return sp.tasks_enqueue_end.insertRange(tk, end), nil
+  sp.tasks_enqueue_end.insertRange(tk, end)
+  return nil
 }
 
 
 /*
   DeferTaskFunc creates a new Task with the specified name and
-  function (`f`), defers it for execution in the task queue,
-  and returns it.
+  function (`f`), defers it for execution in the task queue.
 */
-func (s *Spec) DeferTaskFunc (name string, f TaskFunc) (*Task, error) {
+func (s *Spec) DeferTaskFunc (name string, f TaskFunc) error {
   return s.DeferTask(& Task { Name: name, Func: f })
 }
 
@@ -567,7 +565,7 @@ func (s *Spec) DeferTaskFunc (name string, f TaskFunc) (*Task, error) {
   and asset map function (`f`), defers it for execution in the
   task queue, and returns it.
 */
-func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) (*Task, error) {
+func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) error {
   return s.DeferTask(& Task { Name: name, MapFunc: f })
 }
 
@@ -579,10 +577,9 @@ func (s *Spec) DeferTaskMapFunc (name string, f TaskMapFunc) (*Task, error) {
   immediately before other tasks in the main queue. When the task
   execution loop begins, and after each tasks, all tasks in the
   push queue are flushed into the main task queue to be executed
-  next. This function returns the final inserted item in the push
-  queue.
+  next.
 */
-func (sp *Spec) PushTask (tk *Task) (*Task, error) {
+func (sp *Spec) PushTask (tk *Task) error {
   tk.Spec = sp
 
   // Find the end of the added tasks while
@@ -593,7 +590,7 @@ func (sp *Spec) PushTask (tk *Task) (*Task, error) {
     if next.Spec == sp {
       continue
     } else if next.Spec != nil {
-      return nil, fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
+      return fmt.Errorf("Cannot add this Task to Spec with name \"%s\", it already has a Spec defined with name \"%s\"", sp.Name, next.Spec.Name)
     } else {
       next.Spec = sp
     }
@@ -602,20 +599,19 @@ func (sp *Spec) PushTask (tk *Task) (*Task, error) {
   if sp.tasks_push_queue == nil || sp.tasks_push_end == nil {
     sp.tasks_push_queue = tk
     sp.tasks_push_end   = end
-    return end, nil
+    return nil
   }
 
   sp.tasks_push_end = sp.tasks_push_end.insertRange(tk, end)
-  return end, nil
+  return nil
 }
 
 
 /*
   PushTaskFunc creates a new Task with the specified name and
-  function (`f`), pushs it for execution in the task queue,
-  and returns it.
+  function (`f`), pushs it for execution in the task queue
 */
-func (s *Spec) PushTaskFunc (name string, f TaskFunc) (*Task, error) {
+func (s *Spec) PushTaskFunc (name string, f TaskFunc) error {
   return s.PushTask(& Task { Name: name, Func: f })
 }
 
@@ -632,7 +628,7 @@ func (s *Spec) EnqueueTaskName (name string) (*Task, error) {
   if task == nil || err != nil {
     return nil, err
   }
-  return s.EnqueueTask(task)
+  return task, s.EnqueueTask(task)
 }
 
  
@@ -654,7 +650,7 @@ func (s *Spec) EnqueueUniqueTask (t *Task) (*Task, error) {
     return existing_task, nil
   }
 
-  return s.EnqueueTask(t)
+  return t, s.EnqueueTask(t)
 }
 
 

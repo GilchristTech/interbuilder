@@ -12,11 +12,11 @@ func TestSpecEnqueueTaskIsNotCircular (t *testing.T) {
   spec := NewSpec("test", nil)
   spec.Props["quiet"] = true
 
-  if _, err := spec.EnqueueTask( & Task { Name: "Task1" } ); err != nil {
+  if err := spec.EnqueueTask( & Task { Name: "Task1" } ); err != nil {
     t.Fatal(err)
   }
 
-  if _, err := spec.EnqueueTask( & Task { Name: "Task2" } ); err != nil {
+  if err := spec.EnqueueTask( & Task { Name: "Task2" } ); err != nil {
     t.Fatal(err)
   }
 
@@ -64,9 +64,12 @@ func TestSpecRunDetectsCircularTask (t *testing.T) {
     return nil
   }
 
-  if task_1, err := spec.EnqueueTaskFunc("circular-1", task_func); err != nil {
+  var task_1 = & Task { Name: "circular-1", Func: task_func }
+  var task_2 = & Task { Name: "circular-2", Func: task_func }
+
+  if err := spec.EnqueueTask(task_1); err != nil {
     t.Fatal(err)
-  } else if task_2, err := spec.EnqueueTaskFunc("circular-2", task_func); err != nil {
+  } else if err := spec.EnqueueTask(task_2); err != nil {
     t.Fatal(err)
   } else {
     // manually create a circular Task link, never do this
