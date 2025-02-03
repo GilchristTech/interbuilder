@@ -202,12 +202,14 @@ var TaskResolverAssetsInferHtml = TaskResolver {
     return true, nil
   },
 
+  AcceptMask: TASK_ASSETS_GENERATE | TASK_ASSETS_FILTER | TASK_ASSETS_MUTATE,
+
   TaskPrototype: Task {
     MatchMimePrefix: "text/html",
     Mask: TASK_TASKS_QUEUE,
 
     Func: func (sp *Spec, tk *Task) error {
-      _, err := tk.EnqueueTaskName("apply-path-transformations-html")
+      _, err := tk.EnqueueUniqueTaskName("apply-path-transformations-html")
       return err
     },
   },

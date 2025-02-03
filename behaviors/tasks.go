@@ -18,6 +18,7 @@ var DownloaderMutex sync.Mutex
 var TaskResolverSourceGitClone = TaskResolver {
   Id: "source-git-clone",
   Name: "git-clone", // TODO: consider renaming to source-get-git
+  AcceptMask: TASK_MASK_DEFINED,
   TaskPrototype: Task {
     Mask: TASK_MASK_DEFINED,
     Func: TaskSourceGitClone,
@@ -67,8 +68,6 @@ var TaskResolverInferSource = TaskResolver {
   Children:  &TaskResolverInferSourceNodeJS,
 
   TaskPrototype: Task {
-    Mask: TASK_TASKS_QUEUE,
-
     Func: func (spec *Spec, task *Task) error {
       tr, err := task.Resolver.MatchChildren(task.Name, spec)
       if err != nil {

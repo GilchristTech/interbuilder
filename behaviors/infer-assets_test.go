@@ -12,7 +12,13 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
   var spec = root.AddSubspec(NewSpec("spec", nil))
 
   root.AddTaskResolver(& TaskResolverAssetsInferRoot)
-  TaskResolverAssetsInferRoot.AddTaskResolver(& TaskResolverAssetsInferHtml)
+  
+  if err := TaskResolverAssetsInferRoot.AddTaskResolver(
+    & TaskResolverAssetsInferHtml,
+  ); err != nil {
+    t.Fatal(err)
+  }
+
   root.AddTaskResolver(& TaskResolverApplyPathTransformationsToHtmlContent)
 
   // Path transformation
@@ -28,7 +34,7 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
     asset_txt.Mimetype = "text/plain"
     asset_txt.SetContentBytes([]byte("unmodified/path"))
     if err := tk.EmitAsset(asset_txt); err != nil {
-      return nil
+      return err
     }
 
     asset_html := sp.MakeAsset("index.html")

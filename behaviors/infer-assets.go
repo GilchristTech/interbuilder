@@ -10,9 +10,10 @@ var TaskResolverAssetsInferRoot = TaskResolver {
   Name: "assets-infer",
   Id:   "assets-infer-root",
   MatchBlocks: true,
+  AcceptMask: TASK_FIELDS,
   TaskPrototype: Task {
     Func: TaskAssetsInferRoot,
-    Mask: TASK_TASKS_QUEUE | TASK_ASSETS_GENERATE | TASK_ASSETS_MUTATE,
+    Mask: TASK_FIELDS,
   },
 }
 

@@ -806,3 +806,27 @@ func TestTaskMaskEmit (t *testing.T) {
     t.Fatalf("Spec exitted with an error: %v", err)
   }
 }
+
+
+func TestTaskResolverAcceptMask (t *testing.T) {
+  var root_resolver = & TaskResolver {
+    Id: "accepts-nothing",
+    AcceptMask: TASK_MASK_DEFINED,
+  }
+
+  fmt.Println("...")
+  if err := root_resolver.AddTaskResolver(& TaskResolver {
+    Id: "undefined-mask",
+  }); err == nil {
+    t.Fatal("TaskResolver with undefined (all permissions) Task Mask was added to Task Resolver with a minimal AcceptanceMask and an error was not produced.")
+  }
+
+  if err := root_resolver.AddTaskResolver(& TaskResolver {
+    Id: "no-permissions",
+    TaskPrototype: Task {
+      Mask: TASK_MASK_DEFINED,
+    },
+  }); err != nil {
+    t.Fatal(err)
+  }
+}

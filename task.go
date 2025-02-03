@@ -17,7 +17,7 @@ import (
   be skipped when emitting Assets.
 */
 const (
-  TASK_FIELDS          uint64 = 0b_000_001_111_001  // All bits used by Task masks
+  TASK_FIELDS          uint64 = 0b_001_011_111_001  // All bits used by Task masks
   TASK_FIELDS_ASSETS   uint64 = 0b_000_001_111_000  // Bits in Tasks masks for Asset behaviors
 
   TASK_MASK_DEFINED    uint64 = 0b_000_000_000_001  // This bit distinguishes a Task
@@ -38,6 +38,22 @@ const (
 ) 
 
 
+func TaskMaskContains (accept_mask, test_mask uint64) bool {
+  if test_mask == 0 {
+    return accept_mask == 0 || (accept_mask & TASK_FIELDS == TASK_FIELDS)
+  }
+  return (accept_mask == 0) || (accept_mask & test_mask == test_mask)
+}
+
+
+func TaskMaskValid (accept_mask, test_mask uint64) bool {
+  if test_mask == 0 {
+    return (accept_mask ^ TASK_FIELDS) & TASK_FIELDS == 0
+  }
+  return (accept_mask ^ test_mask) & test_mask == 0
+}
+
+
 type TaskFunc      func (*Spec, *Task) error
 type TaskMapFunc   func (*Asset) (*Asset, error)
 type TaskMatchFunc func (name string, spec *Spec) (bool, error)
@@ -54,7 +70,7 @@ type TaskResolver struct {
   Name          string
   Url           url.URL
   Id            string
-  TaskPrototype Task  // TODO: consider making private.
+  TaskPrototype Task
 
   Spec          *Spec
   History       HistoryEntry
@@ -64,6 +80,13 @@ type TaskResolver struct {
 
   MatchBlocks   bool
   MatchFunc     TaskMatchFunc
+
+  // The TaskResolver Mask is a Task Mask which if defined, only allows
+  // children which have masks inside this one. If a child
+  // resolver has mask bits outside of this one's, it should be
+  // rejected.
+  //
+  AcceptMask uint64
 }
 
 
@@ -390,7 +413,25 @@ func (s *Spec) AddTaskResolver (tr *TaskResolver) {
   Append a TaskResolver to this TaskResolver as a child, taking
   priority over previously-added and sub-resolvers.
 */
-func (tr *TaskResolver) AddTaskResolver (add *TaskResolver) {
+func (tr *TaskResolver) AddTaskResolver (add *TaskResolver) error {
+  // If the Task resolver's acceptance mask is defined, compare
+  // it to the Task Mask of the added resolver, and error if it
+  // is rejected.
+  //
+  if accept_mask := tr.AcceptMask | tr.TaskPrototype.Mask; accept_mask != 0 {
+    var test_mask = add.AcceptMask | add.TaskPrototype.Mask
+    if test_mask == 0 {
+      test_mask = TASK_FIELDS
+    }
+
+    if TaskMaskValid(accept_mask, test_mask) == false {
+      return fmt.Errorf(
+        "Cannot add TaskResolver with id '%s' to '%s', Task mask of %04O not valid within acceptance mask %04O",
+        add.Id, tr.Id, test_mask, accept_mask,
+      )
+    }
+  }
+
   var existing_children = tr.Children
 
   // Search for the last sibling
@@ -400,6 +441,7 @@ func (tr *TaskResolver) AddTaskResolver (add *TaskResolver) {
   last_sibling.Next = existing_children
 
   tr.Children = add
+  return nil
 }
 
 
@@ -802,7 +844,7 @@ func (tk *Task) EmitAsset (a *Asset) error {
   // If the Task mask is defined but not set to emit, error. An undefined
   // (zero) mask is okay.
   //
-  if (tk.Mask & TASK_ASSETS_EMIT != TASK_ASSETS_EMIT) && tk.Mask != 0 {
+  if TaskMaskContains(tk.Mask, TASK_ASSETS_EMIT) == false {
     return fmt.Errorf("Task cannot emit asset, Task.Mask has a value of %O", tk.Mask)
   }
 
@@ -816,10 +858,9 @@ func (tk *Task) EmitAsset (a *Asset) error {
   // assets, or leave the `next` variable nil from trying.
   //
   for next = tk.Next; next != nil; next = next.Next {
-    if (!next.IgnoreAssets                                     &&
-        next.Mask == 0                                         ||
-        next.Mask & TASK_TASKS_QUEUE    == TASK_TASKS_QUEUE    ||
-        next.Mask & TASK_ASSETS_CONSUME == TASK_ASSETS_CONSUME ){
+    if (!next.IgnoreAssets                               &&(
+        TaskMaskContains(next.Mask, TASK_TASKS_QUEUE)     ||
+        TaskMaskContains(next.Mask, TASK_ASSETS_CONSUME) )){
       break
     }
   }
@@ -929,7 +970,7 @@ func (tk *Task) PoolSpecInputAssets () error {
   // If the Task mask is defined but not set to emit, error. An undefined
   // (zero) mask is okay.
   //
-  if (tk.Mask & TASK_ASSETS_CONSUME != TASK_ASSETS_CONSUME) && tk.Mask != 0 {
+  if TaskMaskContains(tk.Mask, TASK_ASSETS_CONSUME) == false {
     return fmt.Errorf("Task cannot pool assets, Task.Mask has a value of %03O, and is not set to consume assets", tk.Mask)
   }
 
@@ -978,6 +1019,8 @@ func (tk *Task) ForwardAssets () error {
   // If a multi-asset can be used, create one with the Assets
   // slice and emit it. This is likely more efficient than
   // iterating Assets and emitting them individually.
+  //
+  // TODO: the first task after this which receives assets is not necessarily tk.Next. This should read ahead for valid tasks, enabling more shortcutting of Assets.
   //
   if tk.Next == nil || tk.Next.AcceptMultiAssets {
     asset := tk.Spec.MakeAsset("")
@@ -1082,19 +1125,59 @@ func (tr *TaskResolver) MatchChildrenWithAsset (a *Asset) (*TaskResolver, error)
 
 
 /*
-  AssertTaskQueue returns an error if this task is unable to
+  AssertTaskQueuing returns an error if this task is unable to
   modify the task queue, either due to an undefined Spec or
   because of Task.Mask permission issues.
 */
-func (tk *Task) AssertTaskQueue () error {
+func (tk *Task) AssertTaskQueuing () error {
   var spec = tk.Spec
 
   if spec == nil {
     return fmt.Errorf("Task with name '%s' cannot modify the task queue, Spec is nil", tk.Name)
   }
 
-  if tk.Mask != 0 && tk.Mask & TASK_TASKS_QUEUE != TASK_TASKS_QUEUE {
-    return fmt.Errorf("Task with name '%s' in spec '%s' cannot modify task queue, Task.Mask has a value of %O", tk.Name, spec.Name, tk.Mask)
+  if TaskMaskContains(tk.Mask, TASK_TASKS_QUEUE) == false {
+    return fmt.Errorf(
+      "Task with name '%s' in spec '%s' cannot modify task queue, Task.Mask has a value of %O",
+      tk.Name, spec.Name, tk.Mask,
+    )
+  }
+
+  return nil
+}
+
+
+/*
+  AssertTaskIsQueueable returns an error if this task would have a
+  permission issue from queuing another task. It does *not*
+  assert that this task can queue tasks; for that, use
+  AssertTaskQueuing.
+*/
+func (tk *Task) AssertTaskIsQueueable (task *Task) error {
+  var accept_resolver_name = "undefined"
+  var test_resolver_name   = "undefined"
+
+  var accept_mask = tk.Mask
+  if tk.Resolver != nil {
+    accept_mask |= tk.Resolver.AcceptMask
+    accept_resolver_name = tk.Resolver.Name
+  }
+
+  if accept_mask == 0 {
+    return nil
+  }
+
+  var test_mask = task.Mask
+  if task.Resolver != nil {
+    test_mask |= task.Resolver.AcceptMask
+    test_resolver_name = task.Resolver.Name
+  }
+
+  if TaskMaskValid(accept_mask, test_mask) == false {
+    return fmt.Errorf(
+      "Task '%s (%s)' cannot add a Task '%s (%s)', added Task's Mask (%04O) is not a subset of (%04O)",
+      tk.Name, accept_resolver_name, task.Name, test_resolver_name, accept_mask, test_mask,
+    )
   }
 
   return nil
@@ -1102,7 +1185,7 @@ func (tk *Task) AssertTaskQueue () error {
 
 
 func (tk *Task) DeferTask (task *Task) error {
-  if err := tk.AssertTaskQueue(); err != nil {
+  if err := tk.AssertTaskQueuing(); err != nil {
     return err
   }
   var spec = tk.Spec
@@ -1129,21 +1212,28 @@ func (tk *Task) DeferTaskMapFunc (name string, fn TaskMapFunc) error {
 
 
 func (tk *Task) EnqueueTask (task *Task) error {
-  if err := tk.AssertTaskQueue(); err != nil {
+  if err := tk.AssertTaskQueuing(); err != nil {
     return err
   }
   var spec = tk.Spec
   spec.task_queue_lock.Lock()
   defer spec.task_queue_lock.Unlock()
+
+  if err := tk.AssertTaskIsQueueable(task); err != nil {
+    return err
+  }
+
   return spec.enqueueTaskUnsafe(task)
 }
 
 
 func (tk *Task) EnqueueTaskFunc (name string, fn TaskFunc) error {
-  return tk.EnqueueTask(& Task {
+  var task = & Task {
     Name: name,
     Func: fn,
-  })
+  }
+
+  return tk.EnqueueTask(task)
 }
 
 
@@ -1152,10 +1242,12 @@ func (tk *Task) EnqueueTaskMapFunc (name string, fn TaskMapFunc) error {
     return fmt.Errorf("EnqueueUniqueTask error: task's name is empty")
   }
 
-  return tk.EnqueueTask(& Task {
+  var task = & Task {
     Name: name,
     MapFunc: fn,
-  })
+  }
+
+  return tk.EnqueueTask(task)
 }
 
 
@@ -1205,7 +1297,7 @@ func (tk *Task) EnqueueUniqueTaskName (name string) (*Task, error) {
 
 
 func (tk *Task) PushTask (task *Task) error {
-  if err := tk.AssertTaskQueue(); err != nil {
+  if err := tk.AssertTaskQueuing(); err != nil {
     return err
   }
   var spec = tk.Spec
