@@ -11,6 +11,7 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
   var root = NewSpec("root", nil)
   var spec = root.AddSubspec(NewSpec("spec", nil))
 
+  root.Props["quiet"] = true
   root.AddTaskResolver(& TaskResolverAssetsInferRoot)
   
   if err := TaskResolverAssetsInferRoot.AddTaskResolver(
@@ -81,6 +82,7 @@ func TestAssetsInferHtmlPathTransformations (t *testing.T) {
       switch key {
         default:
           t.Errorf("Unexpected Asset URL: %s", asset.Url)
+
         case "@emit/transformed/file.txt":
           data, err := asset.GetContentBytes()
           if err != nil {

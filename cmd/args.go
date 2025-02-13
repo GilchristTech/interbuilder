@@ -108,15 +108,17 @@ func (od *cliOutputDefinition) EnqueueTasks (name string, spec *Spec) (error) {
       return err
     }
 
-    for { select {
-    case <-tk.CancelChan:
-      return nil
-    case asset_chunk, ok := <- s.Input:
-      if !ok {
+    for {
+      if asset_chunk, err := tk.AwaitInputAssetNext(); err != nil {
+        return err
+
+      } else if asset_chunk == nil {
         return nil
+
+      } else if err := tk.EmitAsset(asset_chunk); err != nil {
+        return err
       }
-      tk.EmitAsset(asset_chunk)
-    }}
+    }
   })
 
   if err != nil { return err }

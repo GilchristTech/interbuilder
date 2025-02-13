@@ -34,7 +34,7 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
     }
   }`)
 
-  var module_package_json_src = []byte(/* ./module-package/main.js */`{
+  var module_package_json_src = []byte(/* ./module-package/package.json */`{
     "name": "my-module",
     "type": "module",
     "exports": {
@@ -73,7 +73,7 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
   // which is the main entrypoint for the test.
   //
   var err error
-  err = node_spec.WriteFile("package.json", root_package_json_src,   0o660)
+  err = node_spec.WriteFile("package.json", root_package_json_src, 0o660)
   if err != nil { t.Fatal(err) }
   err = node_spec.WriteFile("main.js", root_main_js_src, 0o660)
   if err != nil { t.Fatal(err) }
@@ -100,7 +100,14 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
   //
   var num_assets int = 0
   root.EnqueueTaskFunc("consume-dist", func (s *Spec, tk *Task) error {
-    for asset_chunk := range s.Input {
+    for {
+      asset_chunk, err := tk.AwaitInputAssetNext()
+      if err != nil {
+        return err
+      } else if asset_chunk == nil {
+        break
+      }
+
       tk.Println("Asset chunk:", asset_chunk.Url)
       assets, err := asset_chunk.Flatten()
       if err != nil { return err }
@@ -110,13 +117,13 @@ func TestTaskInferSourceNodeJS (t *testing.T) {
         var asset_url_path string = strings.TrimLeft(asset.Url.Path, "/")
 
         if got, expect := asset_url_path, "@emit/file.txt"; got != expect {
-          t.Fatalf("Unexpected asset path: %s in URL %s, expected %s", asset.Url.Path, asset.Url, expect)
+          return fmt.Errorf("Unexpected asset path: %s in URL %s, expected %s", asset.Url.Path, asset.Url, expect)
         }
 
         if content_bytes, err := asset.GetContentBytes(); err != nil {
-          t.Fatal(err)
+          return err
         } else if got, expect := string(content_bytes), "hello world"; got != expect {
-          t.Fatalf("Asset content is \"%s\", expected \"%s\"", got, expect)
+          return fmt.Errorf("Asset content is \"%s\", expected \"%s\"", got, expect)
         }
       }
     }
@@ -143,7 +150,7 @@ func TestTaskConsumeLinkFilesSingularFiles (t *testing.T) {
 
   subspec := root.AddSubspec( NewSpec("subspec", nil) )
   subspec.Props["source_dir"] = t.TempDir()
-  path_transformations, err := PathTransformationsFromAny("s`^/?`new-`")
+  path_transformations, err := PathTransformationsFromAny("s`^?`new-`")
   if err != nil { t.Fatal(err) }
   subspec.PathTransformations = path_transformations
 
@@ -257,7 +264,14 @@ func TestTaskConsumeLinkFilesWithPathTransformations (t *testing.T) {
   //
   var num_assets int = 0
   root.EnqueueTaskFunc("assert-assets", func (s *Spec, tk *Task) error {
-    for asset_chunk := range s.Input {
+    for {
+      asset_chunk, err := tk.AwaitInputAssetNext()
+      if err != nil {
+        return err
+      } else if asset_chunk == nil {
+        break
+      }
+
       assets, err := asset_chunk.Flatten()
       if err != nil { return err }
 

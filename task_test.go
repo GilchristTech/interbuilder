@@ -197,13 +197,12 @@ func TestTaskEmitAsset (t *testing.T) {
     root.EnqueueTaskFunc("root-consume", func (s *Spec, tk *Task) error {
       var num_assets = 0
 
-      for { select {
-      case <- tk.CancelChan:
-        return nil
-
-      case asset_chunk, ok := <- s.Input:
-        if !ok {
-          return nil
+      for {
+        asset_chunk, err := tk.AwaitInputAssetNext()
+        if err != nil {
+          return err
+        } else if asset_chunk == nil {
+          break
         }
 
         assets, err := asset_chunk.Flatten()
@@ -221,7 +220,7 @@ func TestTaskEmitAsset (t *testing.T) {
             )
           }
         }
-      }}
+      }
 
       expect_num_assets := 1
       if test_case.WillError {
@@ -526,6 +525,7 @@ func TestTaskMaskEmit (t *testing.T) {
   // TODO: add Task to spec with a MapFunc, but mask set not to accept assets.
 
   var root = NewSpec("root", nil)
+  root.Props["quiet"] = true
 
   root.EnqueueTask(& Task {
     Name: "only-emit",

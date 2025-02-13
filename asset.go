@@ -272,26 +272,25 @@ func (s *Spec) EmitAsset (a *Asset) error {
     return fmt.Errorf("Cannot emit a singular asset with a nil URL")
   }
 
-  var modified       bool = false
-  var url_path     string = a.Url.Path
-  var url_prefix   string = ""
-  var suffix_path  string = ""
+  var modified      bool = false
+  var url_path    string = strings.TrimLeft(a.Url.Path, "/")
+  var url_prefix  string = ""
+  var suffix_path string
 
-  // TODO: get asset directive
-  // TODO: what to do with @source???
-  // TODO: if sans-directive, use @emit
+  // TODO: what to do with @source?
 
-  if strings.HasPrefix(url_path, "/@emit/") {
-    url_prefix  = url_path[:len("/@emit/")]
-    suffix_path = url_path[len("/@emit/"):]
-  } else if strings.HasPrefix(url_path, "@emit/") {
-    url_prefix  = url_path[:len("@emit/")]
-    suffix_path = url_path[len("@emit/"):]
+  // Get the directive. If sans-directive, use @emit.
+  //
+  if url_path != "" && url_path[0] == '@' {
+    before, after, _ := strings.Cut(url_path, "/")
+    url_prefix  = before
+    suffix_path = after
   } else {
-    // TODO: detect leading and trailing slashes
-    url_prefix = "/@emit/"
     suffix_path = url_path
-    modified = true
+  }
+
+  if url_prefix == "" {
+    url_prefix = "@emit"
   }
 
   suffix_path = strings.TrimLeft(suffix_path, "/")
@@ -300,11 +299,18 @@ func (s *Spec) EmitAsset (a *Asset) error {
   // Apply path transformations
   //
   for _, transformation := range s.PathTransformations {
-    suffix_path = transformation.TransformPath(suffix_path)
+    suffix_path = strings.TrimLeft(
+      transformation.TransformPath(suffix_path), "/",
+    )
 
     if !modified && (suffix_path != suffix_path_original) {
       modified = true
     }
+  }
+
+  if suffix_path == "" {
+    suffix_path = "/"
+    modified = true
   }
 
   // If the asset was modified, make a shallow copy, because
@@ -312,20 +318,17 @@ func (s *Spec) EmitAsset (a *Asset) error {
   //
   if modified {
     copied     := *a
-    copied.Url  = s.MakeUrl(url_prefix + suffix_path)
+    copied.Url  = s.MakeUrl(url_prefix + "/" + suffix_path)
     a           = & copied
   }
 
-  s.OutputAsset(a)
-
-  return nil
-}
-
-
-func (s *Spec) OutputAsset (a *Asset) {
+  // Send the Asset to all outputs
+  //
   for _, output := range s.OutputChannels {
     (*output) <- a
   }
+
+  return nil
 }
 
 
@@ -473,6 +476,7 @@ func (s *Spec) MakeFileKeyAsset (source_path string, key_parts ...string) (*Asse
 
       return asset, nil
     }
+
   } else {
     // This asset is a file. Populate it with callbacks for IO handling
 

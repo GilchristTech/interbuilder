@@ -108,7 +108,7 @@ func TaskAssetsInferRoot (spec *Spec, tk *Task) error {
       new_subtask := matched_resolver.NewTask()
       new_subtask.Spec = spec
       if err := new_subtask.Run(spec); err != nil {
-        return fmt.Errorf("Error while asset inference is building the task queue: %w", err)
+        return fmt.Errorf("Error while asset inference is building the task queue using a subtask with resolver %s: %w", resolver_id, err)
       }
 
       delete(spec_matched_resolvers, resolver_id)

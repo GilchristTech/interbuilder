@@ -21,7 +21,7 @@ func TestHtmlPipeline (t *testing.T) {
 
   // Path transformation
   //
-  path_transformations, err := PathTransformationsFromAny("s`^/?`transformed/`")
+  path_transformations, err := PathTransformationsFromAny("s`^/*(.*)`transformed/$1`")
   if err != nil { t.Fatal(err) }
   spec.PathTransformations = path_transformations
 
@@ -52,10 +52,11 @@ func TestHtmlPipeline (t *testing.T) {
       return fmt.Errorf("Could not write asset HTML file to produce: %w", err)
     }
 
-    index_asset, err := s.MakeFileKeyAsset("index.html")
-    if err != nil { return err }
-    err = tk.EmitAsset(index_asset)
-    if err != nil { return err }
+    if index_asset, err := s.MakeFileKeyAsset("index.html"); err != nil {
+      return err
+    } else if err := tk.EmitAsset(index_asset); err != nil {
+      return err
+    }
 
     // Write control TXT file
     //
@@ -82,7 +83,11 @@ func TestHtmlPipeline (t *testing.T) {
   //
   root.EnqueueTaskFunc("write", TaskConsumeLinkFiles)
 
+  var printed_spec = false
+
   if err := root.Run(); err != nil {
+    PrintSpec(root)
+    printed_spec = true
     t.Errorf("Error when running Spec tree: %v", err)
   }
 
@@ -114,7 +119,7 @@ func TestHtmlPipeline (t *testing.T) {
     _, file_name := filepath.Split(file_path)
     switch file_name {
       default:
-        t.Errorf("Unrecognized file name: %s", file_name)
+        t.Errorf("Unrecognized file name: %s", file_path)
 
       case "index.html":
         var expected_cases = []string {
@@ -133,6 +138,7 @@ func TestHtmlPipeline (t *testing.T) {
               t.Log(content)
               printed_source = true
             }
+            if !printed_spec { PrintSpec(root); printed_spec = true }
             t.Errorf("HTML content does not contain %s", expected)
           }
         }
@@ -140,6 +146,7 @@ func TestHtmlPipeline (t *testing.T) {
       case "file.txt":
         expected := "This text file should go unmodified"
         if content := string(content); content != expected {
+          if !printed_spec { PrintSpec(root); printed_spec = true }
           t.Errorf("file.txt content is \"%s\", expected \"%s\"", content, expected)
         }
     }
@@ -149,10 +156,12 @@ func TestHtmlPipeline (t *testing.T) {
   })
 
   if err != nil {
+    if !printed_spec { PrintSpec(root); printed_spec = true }
     t.Fatalf("Error walking root spec source_dir: %v", err)
   }
 
   if expected := 2; root_spec_files_walked != expected {
+    if !printed_spec { PrintSpec(root); printed_spec = true }
     t.Fatalf(
       "Expected to walk %d files in root spec source dir (%s), walked %d",
       expected, output_dir, root_spec_files_walked,

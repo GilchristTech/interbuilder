@@ -16,24 +16,38 @@ import (
   be skipped when emitting Assets.
 */
 const (
-  TASK_FIELDS          uint64 = 0b_001_011_111_001  // All bits used by Task masks
-  TASK_FIELDS_ASSETS   uint64 = 0b_000_001_111_000  // Bits in Tasks masks for Asset behaviors
+  TASK_FIELDS              uint64 = 0b_001_111_111_001  // All bits used by Task masks
+  TASK_FIELDS_ASSETS       uint64 = 0b_000_111_111_000  // Bits in Tasks masks for Asset behaviors
+  TASK_FIELDS_TASKS        uint64 = 0b_001_000_000_000  // Bits in Tasks masks for Task behaviors
 
-  TASK_MASK_DEFINED    uint64 = 0b_000_000_000_001  // This bit distinguishes a Task
-                                                    // mask with no permissions from
-                                                    // one with undefined permissions,
-                                                    // allowing masks with a zero
-                                                    // value to act like a null value,
-                                                    // rather than restrictive
-                                                    // permission set.
+  TASK_MASK_DEFINED        uint64 = 0b_000_000_000_001  // This bit distinguishes a Task
+                                                        // mask with no permissions from
+                                                        // one with undefined permissions,
+                                                        // allowing masks with a zero
+                                                        // value to act like a null value,
+                                                        // rather than restrictive
+                                                        // permission set.
 
-  TASK_ASSETS_EMIT     uint64 = 0b_000_001_000_001  // Task emits new Assets
-  TASK_ASSETS_CONSUME  uint64 = 0b_000_010_000_001  // Task relies on Assets
-  TASK_ASSETS_GENERATE uint64 = 0b_000_001_001_001  // Task creates new assets
-  TASK_ASSETS_FILTER   uint64 = 0b_000_011_010_001  // Task may not emit all Assets it consumes
-  TASK_ASSETS_MUTATE   uint64 = 0b_000_011_100_001  // Task changes the content of existing assets
+  TASK_ASSETS_EMIT         uint64 = 0b_000_001_000_001  // Task emits new Assets
+  TASK_ASSETS_GENERATE     uint64 = 0b_000_001_001_001  // Task creates new assets
+  TASK_ASSETS_CONSUME      uint64 = TASK_ASSETS_FROM_ALL
 
-  TASK_TASKS_QUEUE     uint64 = 0b_001_000_000_001  // Task modifies the Task queue
+  TASK_ASSETS_FROM_ALL     uint64 = 0b_000_110_000_001  // Task relies on Assets from anywhere
+  TASK_ASSETS_FROM_SPECS   uint64 = 0b_000_010_000_001  // Task relies on Assets from input Specs
+  TASK_ASSETS_FROM_TASKS   uint64 = 0b_000_100_000_001  // Task relies on Assets from previous Tasks
+
+  TASK_ASSETS_FILTER       uint64 = 0b_000_001_010_001  // Task may not emit all Assets it consumes
+  TASK_ASSETS_MUTATE       uint64 = 0b_000_001_100_001  // Task changes the content of existing assets
+
+  TASK_ASSETS_FILTER_ALL   uint64 = TASK_ASSETS_FILTER | TASK_ASSETS_FROM_ALL
+  TASK_ASSETS_FILTER_SPEC  uint64 = TASK_ASSETS_FILTER | TASK_ASSETS_FROM_SPECS
+  TASK_ASSETS_FILTER_TASK  uint64 = TASK_ASSETS_FILTER | TASK_ASSETS_FROM_TASKS
+
+  TASK_ASSETS_MUTATE_ALL   uint64 = TASK_ASSETS_MUTATE | TASK_ASSETS_FROM_ALL
+  TASK_ASSETS_MUTATE_SPEC  uint64 = TASK_ASSETS_MUTATE | TASK_ASSETS_FROM_SPECS
+  TASK_ASSETS_MUTATE_TASK  uint64 = TASK_ASSETS_MUTATE | TASK_ASSETS_FROM_TASKS
+
+  TASK_TASKS_QUEUE         uint64 = 0b_001_000_000_001  // Task modifies the Task queue
 ) 
 
 
@@ -72,6 +86,7 @@ type Task struct {
   Resolver   *TaskResolver
   Name       string
   Started    bool
+  Errored    bool
   Next       *Task
   History    HistoryEntry
 
@@ -81,7 +96,14 @@ type Task struct {
   //
   Mask uint64
 
-  Assets     []*Asset
+  Assets      []*Asset
+  AssetFrames map[string]*AssetFrame
+
+  num_assets_received  int
+  num_assets_emitted   int
+  num_assets_generated int
+
+  spec_asset_number int
 
   // Func task callback functions only run when this task is
   // reached in the Task queue. It can access its internal Assets
@@ -99,6 +121,7 @@ type Task struct {
   //
   MapFunc TaskMapFunc
 
+  // TODO: deprecate, replace with methods
   CancelChan chan bool
 
   /*
@@ -250,7 +273,12 @@ func (tk *Task) Run (s *Spec) error {
   }
 
   tk.Started = true
-  return tk.Func(s, tk)
+  tk.Errored = false
+  if err := tk.Func(s, tk); err != nil {
+    tk.Errored = true
+    return err
+  }
+  return nil
 }
 
 
@@ -613,7 +641,7 @@ func (s *Spec) flushTaskPushQueue () *Task {
 
 
 /*
-  PassAsset sends an Asset to subsequent assets. As long
+  EmitAsset sends an Asset to subsequent assets. As long
   as there are Tasks with only MapFuncs, the asset will have
   those map function applied, and Tasks with normal Funcs will
   have the asset deposited into their asset array and block the
@@ -621,16 +649,42 @@ func (s *Spec) flushTaskPushQueue () *Task {
   an Asset makes it all the way through the Task queue, it is
   emitted.
 */
-func (tk *Task) EmitAsset (a *Asset) error {
+func (tk *Task) EmitAsset (asset *Asset) error {
+  var spec = tk.Spec
+
+
   // If the Task mask is defined but not set to emit, error. An undefined
   // (zero) mask is okay.
   //
   if TaskMaskContains(tk.Mask, TASK_ASSETS_EMIT) == false {
-    return fmt.Errorf("Task cannot emit asset, Task.Mask has a value of %O", tk.Mask)
+    return fmt.Errorf(
+      "Task cannot emit asset, Task.Mask has a value of %04O",
+      tk.Mask,
+    )
   }
 
-  var asset *Asset = a
-  var err   error
+  // Update the AssetFrame with this Asset's URL path
+  spec.asset_frame_lock.Lock()
+  if spec.AssetFrame.HasKey(asset.Url.Path) == false {
+    if TaskMaskContains(tk.Mask, TASK_ASSETS_GENERATE) == false {
+      return fmt.Errorf(
+        "Task cannot emit asset with new URL, Task.Mask states it cannot generate Assets (mask: %O)",
+        tk.Mask,
+      )
+    }
+
+    if err := spec.AssetFrame.AddKey(asset.Url.Path); err != nil {
+      return err
+    }
+
+    tk.num_assets_generated++
+  }
+  spec.asset_frame_lock.Unlock()
+
+  if asset.Spec == nil {
+    asset.Spec = tk.Spec
+  }
+  var err error
 
   var next *Task = tk.Next
 
@@ -641,7 +695,9 @@ func (tk *Task) EmitAsset (a *Asset) error {
   for next = tk.Next; next != nil; next = next.Next {
     if (!next.IgnoreAssets                               &&(
         TaskMaskContains(next.Mask, TASK_TASKS_QUEUE)     ||
-        TaskMaskContains(next.Mask, TASK_ASSETS_CONSUME) )){
+        TaskMaskContains(next.Mask, TASK_ASSETS_CONSUME)  ||
+        TaskMaskContains(next.Mask, TASK_ASSETS_FILTER)   ||
+        TaskMaskContains(next.Mask, TASK_ASSETS_MUTATE)  )){
       break
     }
   }
@@ -651,16 +707,17 @@ func (tk *Task) EmitAsset (a *Asset) error {
   //
   if next == nil {
     if tk.Spec != nil {
-      if err := tk.Spec.EmitAsset(a); err != nil {
+      if err := tk.Spec.EmitAsset(asset); err != nil {
         return fmt.Errorf("Error in task %s emitting asset: %w", tk.Name, err)
       }
     }
+    tk.num_assets_emitted++
     return nil
   }
 
   // Handle pluralistic assets
   //
-  if a.IsMulti() {
+  if asset.IsMulti() {
 
     // This pluralistic asset can be handled the same way as a
     // singular asset. Exit any special multi-asset handling.
@@ -675,13 +732,14 @@ func (tk *Task) EmitAsset (a *Asset) error {
     // multi-asset was not found.
     //
     if next.RejectFlattenMultiAssets == false {
-      if assets, err := a.Flatten(); err != nil {
+      if assets, err := asset.Flatten(); err != nil {
         return err
       } else {
-        for _, asset := range assets {
-          if err := tk.EmitAsset(asset); err != nil {
+        for _, flattened_asset := range assets {
+          if err := tk.EmitAsset(flattened_asset); err != nil {
             return err
           }
+          tk.num_assets_emitted++
         }
       }
       return nil
@@ -699,6 +757,7 @@ func (tk *Task) EmitAsset (a *Asset) error {
   if matches, err := next.MatchAsset(asset); err != nil {
     return err
   } else if matches == false {
+    tk.num_assets_emitted++
     return next.EmitAsset(asset)
   }
 
@@ -708,6 +767,7 @@ func (tk *Task) EmitAsset (a *Asset) error {
   // Asset buffer and exit.
   //
   if next.MapFunc == nil {
+    tk.num_assets_emitted++
     next.AddAsset(asset)
     return nil
   }
@@ -720,7 +780,28 @@ func (tk *Task) EmitAsset (a *Asset) error {
   if err != nil {
     return fmt.Errorf("Error in task %s MapFunc: %w", next.Name, err)
   }
-  if asset == nil { return nil }
+  if asset == nil {
+    // Assert that the next task has the permission to filter
+    // assets. If so, filter this Asset by returning early, or
+    // return a permission error.
+    //
+    if asset.Spec == next.Spec {
+      if TaskMaskContains(tk.Mask, TASK_ASSETS_FILTER_TASK) == false {
+        return fmt.Errorf(
+          "Task %s cannot filter assets from tasks, but its MapFunc returned nil (mask: %04O)",
+          next.Name, next.Mask,
+        )
+      }
+    } else {
+      if TaskMaskContains(tk.Mask, TASK_ASSETS_FILTER_SPEC) == false {
+        return fmt.Errorf(
+          "Task %s cannot filter assets from specs, but its MapFunc returned nil (mask: %04O)",
+          next.Name, next.Mask,
+        )
+      }
+    }
+    return nil
+  }
 
   // With the new asset, if the next task has a Func, then it is
   // the destination, since the Func may mutate the asset via its
@@ -728,6 +809,7 @@ func (tk *Task) EmitAsset (a *Asset) error {
   //
   if next.Func != nil {
     next.AddAsset(asset)
+    tk.num_assets_emitted++
     return nil
   }
 
@@ -737,29 +819,65 @@ func (tk *Task) EmitAsset (a *Asset) error {
   // the Task without requiring the task queue to synchronize up
   // until that point.
   //
+  tk.num_assets_emitted++
   return next.EmitAsset(asset)
+}
+
+
+func (tk *Task) AwaitInputAssetNumber (number int) (*Asset, error) {
+  if err := tk.AssertSpec(); err != nil {
+    return nil, fmt.Errorf("Task %s cannot await Asset input: %w", tk.Name, err)
+  }
+
+  if TaskMaskContains(tk.Mask, TASK_ASSETS_FROM_SPECS) == false {
+    return nil, fmt.Errorf(
+      "Task %s cannot await Asset input: Task.Mask forbids receiving assets from specs (%04O)", tk.Name, tk.Mask,
+    )
+  }
+
+  return tk.Spec.AwaitInputAssetNumber(number), nil
+}
+
+
+func (tk *Task) AwaitInputAssetNext () (*Asset, error) {
+  if asset, err := tk.AwaitInputAssetNumber(tk.spec_asset_number); err != nil {
+    return nil, err
+
+  } else if asset != nil {
+    tk.spec_asset_number++
+    return asset, nil
+  }
+
+  return nil, nil
 }
 
 
 /*
   PoolSpecInputAssets reads the Spec input channel for asset
-  chunks and inserts them into the Task's Asset array. Note:
-  because this blocks until all input is received, it can be less
-  efficient than using a range over the Input channel.
+  chunks and inserts them into the Task's Asset array.
 */
 func (tk *Task) PoolSpecInputAssets () error {
   // If the Task mask is defined but not set to emit, error. An undefined
   // (zero) mask is okay.
   //
   if TaskMaskContains(tk.Mask, TASK_ASSETS_CONSUME) == false {
-    return fmt.Errorf("Task cannot pool assets, Task.Mask has a value of %03O, and is not set to consume assets", tk.Mask)
+    return fmt.Errorf("Task cannot pool assets, Task.Mask has a value of %04O, and is not set to consume assets", tk.Mask)
   }
 
   if tk.Spec == nil {
     return fmt.Errorf("Task Spec is nil")
   }
 
-  for asset_chunk := range tk.Spec.Input {
+  for {
+    asset_chunk, err := tk.AwaitInputAssetNext()
+    if err != nil {
+      return err
+    }
+
+    if asset_chunk == nil {
+      break
+    }
+
     if asset_chunk.IsSingle() || tk.AcceptMultiAssets {
       tk.Assets = append(tk.Assets, asset_chunk)
       continue
@@ -828,7 +946,9 @@ func (tk *Task) ForwardAssets () error {
   Asset or Task.
 */
 func (tk *Task) AddAsset (a *Asset) *Asset {
+  // TODO: add error and check Asset permissions
   if a != nil {
+    tk.num_assets_received++
     tk.Assets = append(tk.Assets, a)
   }
   return a
@@ -860,16 +980,28 @@ func (tk *Task) MatchAsset (a *Asset) (bool, error) {
 
 
 /*
+  AssertSpec returns an error if this task's Spec is nil.
+*/
+func (tk *Task) AssertSpec () error {
+  if tk.Spec != nil {
+    return nil
+  }
+
+  return fmt.Errorf("Spec is nil")
+}
+
+
+/*
   AssertTaskQueuing returns an error if this task is unable to
   modify the task queue, either due to an undefined Spec or
   because of Task.Mask permission issues.
 */
 func (tk *Task) AssertTaskQueuing () error {
-  var spec = tk.Spec
-
-  if spec == nil {
-    return fmt.Errorf("Task with name '%s' cannot modify the task queue, Spec is nil", tk.Name)
+  if err := tk.AssertSpec(); err != nil {
+    return fmt.Errorf("Task with name '%s' cannot modify the task queue: %w", tk.Name, err)
   }
+
+  var spec = tk.Spec
 
   if TaskMaskContains(tk.Mask, TASK_TASKS_QUEUE) == false {
     return fmt.Errorf(
@@ -911,7 +1043,7 @@ func (tk *Task) AssertTaskIsQueueable (task *Task) error {
   if TaskMaskValid(accept_mask, test_mask) == false {
     return fmt.Errorf(
       "Task '%s (%s)' cannot add a Task '%s (%s)', added Task's Mask (%04O) is not a subset of (%04O)",
-      tk.Name, accept_resolver_name, task.Name, test_resolver_name, accept_mask, test_mask,
+      tk.Name, accept_resolver_name, task.Name, test_resolver_name, test_mask, accept_mask,
     )
   }
 

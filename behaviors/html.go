@@ -20,7 +20,7 @@ var TaskResolverApplyPathTransformationsToHtmlContent = TaskResolver {
     return len(spec.PathTransformations) > 0, nil
   },
   TaskPrototype: Task {
-    Mask: TASK_ASSETS_MUTATE,
+    Mask: TASK_ASSETS_MUTATE_ALL,
     MatchMimePrefix: "text/html",
     MapFunc: TaskMapApplyPathTransformationsToHtmlContent,
   },
@@ -202,7 +202,7 @@ var TaskResolverAssetsInferHtml = TaskResolver {
     return true, nil
   },
 
-  AcceptMask: TASK_ASSETS_GENERATE | TASK_ASSETS_FILTER | TASK_ASSETS_MUTATE,
+  AcceptMask: TASK_ASSETS_GENERATE | TASK_ASSETS_FILTER | TASK_ASSETS_MUTATE_ALL,
 
   TaskPrototype: Task {
     MatchMimePrefix: "text/html",

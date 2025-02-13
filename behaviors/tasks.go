@@ -178,8 +178,6 @@ func TaskSourceBuildNodeJS (sp *Spec, tk *Task) error {
     return err
   }
 
-  // TODO: emit @emit assets
-
   for _, path := range check_paths {
     if dist_exists, err := sp.PathExists(path); err != nil {
       return err

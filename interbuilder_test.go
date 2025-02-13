@@ -143,22 +143,19 @@ func TestSpecChildRunEmitConsumesAssetFinishes (t *testing.T) {
 
   root.Props["quiet"] = true
 
-  subspec.EnqueueTaskFunc("test-emit", func (s *Spec, t *Task) error {
-    if e := s.EmitAsset( & Asset { Url: s.MakeUrl("a") } ); e != nil { return e }
-    if e := s.EmitAsset( & Asset { Url: s.MakeUrl("b") } ); e != nil { return e }
-    if e := s.EmitAsset( & Asset { Url: s.MakeUrl("c") } ); e != nil { return e }
+  subspec.EnqueueTaskFunc("test-emit", func (sp *Spec, tk *Task) error {
+    if e := tk.EmitAsset( sp.MakeAsset("a") ); e != nil { return e }
+    if e := tk.EmitAsset( sp.MakeAsset("b") ); e != nil { return e }
+    if e := tk.EmitAsset( sp.MakeAsset("c") ); e != nil { return e }
     return nil
   })
 
-  root.EnqueueTaskFunc("test-consume", func (s *Spec, task *Task) error {
-    var asset_count int = 0
-    for asset := range s.Input {
-      if asset != nil {
-        asset_count++
-      }
+  root.EnqueueTaskFunc("test-consume", func (sp *Spec, tk *Task) error {
+    if err :=  tk.PoolSpecInputAssets(); err != nil {
+      return err
     }
 
-    if asset_count != 3 {
+    if len(tk.Assets) != 3 {
       t.Fatal("Did not consume exactly three assets")
     }
 
@@ -175,15 +172,16 @@ func TestSpecTaskCancelledBySubspecError (t *testing.T) {
 
   root.Props["quiet"] = true
 
-  root.EnqueueTaskFunc("cancellable-consume", func (s *Spec, tk *Task) error {
-    for { select {
-      case <-tk.CancelChan:
-        return nil
-      case asset_chunk, ok := <-s.Input:
-        if ok {
-          t.Fatalf("Spec received unexpected asset chunk: %v", asset_chunk)
-        }
-    }}
+  root.EnqueueTaskFunc("cancellable-consume", func (sp *Spec, tk *Task) error {
+    for {
+      if asset, err := tk.AwaitInputAssetNext(); err != nil {
+        return err
+      } else if asset != nil {
+        t.Fatalf("Spec received unexpected asset chunk: %v", asset)
+      } else {
+        // Asset chunk is nil, which is correct
+      }
+    }
     return nil
   })
 
@@ -204,6 +202,9 @@ func TestSpecTaskCancelledBySubspecError (t *testing.T) {
 }
 
 
+/*
+  TestSpecChainTransformAssetPaths tests 
+*/
 func TestSpecChainTransformAssetPaths (t *testing.T) {
   root    := NewSpec("root", nil)
   level_3 :=    root.AddSubspec( NewSpec("level_3", nil ) )
@@ -241,14 +242,21 @@ func TestSpecChainTransformAssetPaths (t *testing.T) {
           num_assets++
         }
         produce_assets_finished = true
+
       } else {
         // Consume assets if this is not the
         // lowest-level spec in the chain
         //
-        for a := range s.Input {
-          task.Println(a.Url)
-          s.EmitAsset(a)
-          num_assets++
+        for {
+          if asset, err := task.AwaitInputAssetNext(); err != nil {
+            return err
+          } else if asset == nil {
+            break
+          } else {
+            task.Println(asset.Url)
+            s.EmitAsset(asset)
+            num_assets++
+          }
         }
       }
 
@@ -269,7 +277,14 @@ func TestSpecChainTransformAssetPaths (t *testing.T) {
 
     var expected_urls_found [3]bool
 
-    for asset := range s.Input {
+    for {
+      asset, err := task.AwaitInputAssetNext()
+      if err != nil {
+        return err
+      } else if asset == nil {
+        break
+      }
+
       task.Println(asset.Url)
       
       var url_matches bool
@@ -377,13 +392,12 @@ func TestTaskPassAssetsToSpec (t *testing.T) {
   })
 
   root.EnqueueTaskFunc("consume-assert", func (s *Spec, tk *Task) error {
-    for { select {
-    case <-tk.CancelChan:
-      return nil
-
-    case asset_chunk, ok := <-s.Input:
-      if !ok {
-        return nil
+    for {
+      asset_chunk, err := tk.AwaitInputAssetNext()
+      if err != nil {
+        return err
+      } else if asset_chunk == nil {
+        break
       }
 
       assets, err := asset_chunk.Flatten()
@@ -408,7 +422,7 @@ func TestTaskPassAssetsToSpec (t *testing.T) {
           }
         }
       }
-    }}
+    }
 
     return nil
   })

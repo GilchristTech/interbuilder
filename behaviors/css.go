@@ -26,9 +26,9 @@ var TaskResolverApplyPathTransformationsToCssContent = TaskResolver {
     return len(spec.PathTransformations) > 0, nil
   },
   TaskPrototype: Task {
-    Mask: TASK_ASSETS_MUTATE,
+    Mask:            TASK_ASSETS_MUTATE_ALL,
     MatchMimePrefix: "text/css",
-    MapFunc: TaskMapApplyPathTransformationsToCssContent,
+    MapFunc:         TaskMapApplyPathTransformationsToCssContent,
   },
 }
 
@@ -191,7 +191,7 @@ var TaskResolverAssetsInferCss = TaskResolver {
 
   TaskPrototype: Task {
     MatchMimePrefix: "text/css",
-    Mask: TASK_TASKS_QUEUE,
+    Mask: TASK_TASKS_QUEUE | TASK_ASSETS_MUTATE_ALL,
 
     Func: func (s *Spec, tk *Task) error {
       _, err := tk.EnqueueTaskName("apply-path-transformations-css")
