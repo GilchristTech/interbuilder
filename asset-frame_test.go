@@ -39,7 +39,8 @@ func TestAutomaticAssetFrames (t *testing.T) {
     if asset_frame, ok := asset_frames["produce"]; !ok {
      return fmt.Errorf("Asset frame not found: produce")
 
-    } else if length, expect := len(asset_frame.Assets), 9; length != expect {
+    } else if length, expect := len(asset_frame.assets), 9; length != expect {
+      // TODO: the above tests asset_frame.assets, which is private. This should be testing a public method or value.
       t.Errorf("Expected AssetFrame to have %d asset(1), got %d", expect, length)
     }
 

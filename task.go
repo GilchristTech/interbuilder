@@ -97,7 +97,6 @@ type Task struct {
   Mask uint64
 
   Assets      []*Asset
-  AssetFrames map[string]*AssetFrame
 
   num_assets_received  int
   num_assets_emitted   int

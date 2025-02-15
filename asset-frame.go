@@ -3,40 +3,72 @@ package interbuilder
 import (
   "fmt"
   "net/url"
+  "sync"
 )
 
 
 type AssetFrame struct {
   History *HistoryEntry
   Spec *Spec
-  Assets map[string]AssetFrameEntry
-}
-
-
-func (af *AssetFrame) AddKey (key string) error {
-  if _, has_key := af.Assets[key]; has_key {
-    return nil
-  }
-
-  af.Assets[key] = AssetFrameEntry {}
-  return nil
-}
-
-func (af *AssetFrame) HasKey (key string) bool {
-  _, has_key := af.Assets[key]
-  return has_key
+  assets map[string]*AssetFrameEntry
+  lock sync.Mutex
 }
 
 
 type AssetFrameEntry struct {
-  Url      *url.URL
-  LastTask *Task
-  asset    *Asset
+  Url       *url.URL
+  asset     *Asset
+  asset_err error
+  lock      sync.RWMutex
+  cond      *sync.Cond
 }
 
 
-func (ae *AssetFrameEntry) GetAsset () *Asset {
-  return ae.asset
+func (af *AssetFrame) AddKey (key string) error {
+  af.lock.Lock()
+  defer af.lock.Unlock()
+
+  if _, has_key := af.assets[key]; has_key {
+    return nil
+  }
+
+  var entry = & AssetFrameEntry {}
+  af.assets[key] = entry
+  entry.cond = sync.NewCond(&entry.lock)
+  return nil
+}
+
+func (af *AssetFrame) HasKey (key string) bool {
+  _, has_key := af.assets[key]
+  return has_key
+}
+
+
+func (ae *AssetFrameEntry) AwaitAsset () (*Asset, error) {
+  ae.cond.L.Lock()
+  defer ae.cond.L.Unlock()
+
+  for {
+    if ae.asset != nil || ae.asset_err != nil {
+      return ae.asset, ae.asset_err
+    }
+    ae.cond.Wait()
+  }
+
+  return ae.asset, nil
+}
+
+
+func (ae *AssetFrameEntry) SetAsset () error {
+  ae.cond.L.Lock()
+  defer ae.cond.L.Unlock()
+
+  if ae.asset != nil || ae.asset_err != nil {
+    return fmt.Errorf("Cannot SetAsset in AssetFrame, Asset is already set.")
+  }
+
+  ae.cond.Broadcast()
+  return nil
 }
 
 

@@ -267,65 +267,47 @@ func (s *Spec) WriteFile (key string, data []byte, perm fs.FileMode) error {
 }
 
 
-func (s *Spec) EmitAsset (a *Asset) error {
-  if a.Url == nil {
-    return fmt.Errorf("Cannot emit a singular asset with a nil URL")
+func (sp *Spec) EmitAsset (asset *Asset) error {
+  if asset.Url == nil {
+    return fmt.Errorf("Cannot emit asset with a nil URL")
   }
 
-  var modified      bool = false
-  var url_path    string = strings.TrimLeft(a.Url.Path, "/")
-  var url_prefix  string = ""
-  var suffix_path string
-
   // TODO: what to do with @source?
+
+  var url_path      = strings.TrimLeft(asset.Url.Path, "/")
+  var url_key       = ""
+  var url_directive = "@emit"
+
+  var modified_url_directive bool = false
 
   // Get the directive. If sans-directive, use @emit.
   //
   if url_path != "" && url_path[0] == '@' {
-    before, after, _ := strings.Cut(url_path, "/")
-    url_prefix  = before
-    suffix_path = after
+    url_directive, url_key, _ = strings.Cut(url_path, "/")
   } else {
-    suffix_path = url_path
+    url_key = url_path
+    modified_url_directive = true
   }
 
-  if url_prefix == "" {
-    url_prefix = "@emit"
-  }
-
-  suffix_path = strings.TrimLeft(suffix_path, "/")
-  var suffix_path_original = suffix_path
-
-  // Apply path transformations
-  //
-  for _, transformation := range s.PathTransformations {
-    suffix_path = strings.TrimLeft(
-      transformation.TransformPath(suffix_path), "/",
-    )
-
-    if !modified && (suffix_path != suffix_path_original) {
-      modified = true
-    }
-  }
-
-  if suffix_path == "" {
-    suffix_path = "/"
-    modified = true
-  }
+  var new_key = sp.TransformPath(url_key)
+  var modified_key bool = new_key != url_key
 
   // If the asset was modified, make a shallow copy, because
   // there may be multiple assets.
   //
-  if modified {
-    copied     := *a
-    copied.Url  = s.MakeUrl(url_prefix + "/" + suffix_path)
-    a           = & copied
+  if modified_key || modified_url_directive {
+    copied     := *asset
+    copied.Url  = sp.MakeUrl(url_directive, new_key)
+    asset       = & copied
   }
+
+  // Tell the AssetFrame that this Asset has resolved.
+  //if sp.AssetFrame.HasKey(a.Url.Path)
 
   // Send the Asset to all outputs
   //
-  for _, output := range s.OutputChannels {
-    (*output) <- a
+  for _, output := range sp.OutputChannels {
+    (*output) <- asset
   }
 
   return nil

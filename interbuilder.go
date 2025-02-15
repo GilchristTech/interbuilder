@@ -236,7 +236,7 @@ func (sp *Spec) Run () error {
   //
   sp.AssetFrame = & AssetFrame {
     Spec: sp,
-    Assets: make(map[string]AssetFrameEntry),
+    assets: make(map[string]*AssetFrameEntry),
   }
 
   var num_subspecs = len(sp.Subspecs)
@@ -480,6 +480,30 @@ func (sp *Spec) AwaitInputAssetNumber (number int) *Asset {
   }
 
   return sp.assets_input[number]
+}
+
+
+/*
+  TransformPath applies this Spec's PathTransformations to an
+  Asset path, returning the new path.
+*/
+func (sp *Spec) TransformPath (path string) string {
+  path = strings.TrimLeft(path, "/")
+  var new_path string = path
+
+  // Apply path transformations
+  //
+  for _, transformation := range sp.PathTransformations {
+    new_path = strings.TrimLeft(
+      transformation.TransformPath(new_path), "/",
+    )
+  }
+
+  if new_path == "" {
+    new_path = "/"
+  }
+
+  return new_path
 }
 
 
