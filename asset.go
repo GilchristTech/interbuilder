@@ -267,53 +267,6 @@ func (s *Spec) WriteFile (key string, data []byte, perm fs.FileMode) error {
 }
 
 
-func (sp *Spec) EmitAsset (asset *Asset) error {
-  if asset.Url == nil {
-    return fmt.Errorf("Cannot emit asset with a nil URL")
-  }
-
-  // TODO: what to do with @source?
-
-  var url_path      = strings.TrimLeft(asset.Url.Path, "/")
-  var url_key       = ""
-  var url_directive = "@emit"
-
-  var modified_url_directive bool = false
-
-  // Get the directive. If sans-directive, use @emit.
-  //
-  if url_path != "" && url_path[0] == '@' {
-    url_directive, url_key, _ = strings.Cut(url_path, "/")
-  } else {
-    url_key = url_path
-    modified_url_directive = true
-  }
-
-  var new_key = sp.TransformPath(url_key)
-  var modified_key bool = new_key != url_key
-
-  // If the asset was modified, make a shallow copy, because
-  // there may be multiple assets.
-  //
-  if modified_key || modified_url_directive {
-    copied     := *asset
-    copied.Url  = sp.MakeUrl(url_directive, new_key)
-    asset       = & copied
-  }
-
-  // Tell the AssetFrame that this Asset has resolved.
-  //if sp.AssetFrame.HasKey(a.Url.Path)
-
-  // Send the Asset to all outputs
-  //
-  for _, output := range sp.OutputChannels {
-    (*output) <- asset
-  }
-
-  return nil
-}
-
-
 func (s *Spec) EmitFileKey (file_path string, key_parts ...string) error {
   var key string
 
