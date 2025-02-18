@@ -235,7 +235,7 @@ func (sp *Spec) Run () error {
   // Initialize Spec AssetFrame
   //
   sp.AssetFrame = & AssetFrame {
-    Spec: sp,
+    Spec:   sp,
     assets: make(map[string]*AssetFrameEntry),
   }
 
@@ -252,7 +252,7 @@ func (sp *Spec) Run () error {
   // AssetFrame input synchonization
   //
   if sp.asset_frames_expect > 0 {
-    go sp.runAssetFrameBroadcast()
+    go sp.runAssetFrameRelayBroadcast()
   }
 
   // Receive Assets from inputs
@@ -415,7 +415,7 @@ func (sp *Spec) Run () error {
 }
 
 
-func (sp *Spec) runAssetFrameBroadcast () {
+func (sp *Spec) runAssetFrameRelayBroadcast () {
   for asset_frame := range sp.asset_frames_chan {
     sp.asset_frames_lock.Lock()
     sp.asset_frames[asset_frame.Spec.Name] = asset_frame

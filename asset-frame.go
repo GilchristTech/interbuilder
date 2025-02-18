@@ -25,9 +25,6 @@ type AssetFrameEntry struct {
 
 
 func (af *AssetFrame) AddKey (key string) error {
-  af.lock.Lock()
-  defer af.lock.Unlock()
-
   if _, has_key := af.assets[key]; has_key {
     return nil
   }
@@ -37,6 +34,13 @@ func (af *AssetFrame) AddKey (key string) error {
   entry.cond = sync.NewCond(&entry.lock)
   return nil
 }
+
+
+func (af *AssetFrame) RemoveKey (key string) error {
+  delete(af.assets, key)
+  return nil
+}
+
 
 func (af *AssetFrame) HasKey (key string) bool {
   _, has_key := af.assets[key]

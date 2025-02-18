@@ -651,7 +651,6 @@ func (s *Spec) flushTaskPushQueue () *Task {
 func (tk *Task) EmitAsset (asset *Asset) error {
   var spec = tk.Spec
 
-
   // If the Task mask is defined but not set to emit, error. An undefined
   // (zero) mask is okay.
   //
@@ -759,7 +758,6 @@ func (tk *Task) EmitAsset (asset *Asset) error {
     tk.num_assets_emitted++
     return next.EmitAsset(asset)
   }
-
   // This asset matches in the next task.
 
   // If the next task has no MapFunc, deposit it into that task's
@@ -775,30 +773,30 @@ func (tk *Task) EmitAsset (asset *Asset) error {
   // MapFunc. Apply the map function and replace the asset with a
   // new reference.
   //
+  var asset_pre_mapped_key = asset.Url.Path
   asset, err = next.MapFunc(asset)
   if err != nil {
     return fmt.Errorf("Error in task %s MapFunc: %w", next.Name, err)
   }
+
   if asset == nil {
     // Assert that the next task has the permission to filter
     // assets. If so, filter this Asset by returning early, or
     // return a permission error.
     //
-    if asset.Spec == next.Spec {
-      if TaskMaskContains(tk.Mask, TASK_ASSETS_FILTER_TASK) == false {
-        return fmt.Errorf(
-          "Task %s cannot filter assets from tasks, but its MapFunc returned nil (mask: %04O)",
-          next.Name, next.Mask,
-        )
-      }
-    } else {
-      if TaskMaskContains(tk.Mask, TASK_ASSETS_FILTER_SPEC) == false {
-        return fmt.Errorf(
-          "Task %s cannot filter assets from specs, but its MapFunc returned nil (mask: %04O)",
-          next.Name, next.Mask,
-        )
-      }
+    if TaskMaskContains(tk.Mask, TASK_ASSETS_FILTER_SPEC) == false {
+      return fmt.Errorf(
+        "Task %s cannot filter assets from specs, but its MapFunc returned nil (mask: %04O)",
+        next.Name, next.Mask,
+      )
     }
+
+    // Remove the asset from the spec's AssetFrame and exit.
+    //
+    spec.asset_frame_lock.Lock()
+    spec.AssetFrame.RemoveKey(asset_pre_mapped_key)
+    spec.asset_frame_lock.Unlock()
+
     return nil
   }
 
