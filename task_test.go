@@ -326,14 +326,28 @@ func TestTaskIgnoreAssets (t *testing.T) {
 }
 
 
+func TestTaskPoolSpecInputAssetsWithNoInput (t *testing.T) {
+  var spec = NewSpec("test-Task.PoolSpecInputAssets-no-input", nil)
+
+  spec.EnqueueTaskFunc("pool-assets", func (sp *Spec, tk *Task) error {
+    if err := tk.PoolSpecInputAssets(); err != nil {
+      return err
+    }
+    return nil
+  })
+
+  if err := spec.Run(); err != nil {
+    t.Error(err)
+  }
+}
+
+
 func TestTaskEmitMultiAsset (t *testing.T) {
   var resolver_produce_asset_single = TaskResolver {
     Name: "produce-asset-singular",
     TaskPrototype: Task {
       AcceptMultiAssets: true,
       Func: func (s *Spec, tk *Task) error {
-        tk.PoolSpecInputAssets()
-
         if err := tk.ForwardAssets(); err != nil {
           return fmt.Errorf("Error forwarding assets: %w", err)
         }
@@ -357,7 +371,7 @@ func TestTaskEmitMultiAsset (t *testing.T) {
           return fmt.Errorf("Error forwarding assets: %w", err)
         }
 
-        // Produce and emit a multi-asset with ten assets.
+        // Produce and emit a multi-asset with 10 assets.
         //
         asset := s.MakeAsset("multi")
         asset.SetAssetArray([]*Asset {
@@ -466,8 +480,12 @@ func TestTaskEmitMultiAsset (t *testing.T) {
 
   TEST_CASES:
   for test_case_i, test_case := range test_cases {
-    var root = NewSpec("root", nil)
-    var spec = root.AddSubspec(NewSpec("spec", nil))
+    fmt.Println("  ---  Initializing test case", test_case_i, " ---")
+    var root = NewSpec(fmt.Sprintf("root_test-case-%d", test_case_i), nil)
+    var spec = root.AddSubspec(
+      NewSpec(fmt.Sprintf("subspec_test-case-%d", test_case_i),
+      nil),
+    )
     root.Props["quiet"] = true
 
     // Generate the task queue
@@ -569,7 +587,7 @@ func TestTaskMaskEmit (t *testing.T) {
 
   root.EnqueueTask(& Task {
     Name: "consume-assets",
-    Mask: TASK_ASSETS_CONSUME,
+    Mask: TASK_ASSETS_CONSUME | TASK_ASSETS_FILTER_ALL,
     Func: func (sp *Spec, tk *Task) error {
       if err := tk.PoolSpecInputAssets(); err != nil {
         return err
@@ -579,7 +597,7 @@ func TestTaskMaskEmit (t *testing.T) {
         t.Errorf("Task expected to consume %d assets, got %d", expect, length)
       }
 
-      return nil
+      return tk.ForwardAssets()
     },
   })
 

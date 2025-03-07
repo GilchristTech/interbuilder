@@ -2,7 +2,9 @@ package interbuilder
 
 import (
   "fmt"
+  "context"
   "sync"
+  "sync/atomic"
   "net/url"
   "strings"
   "time"
@@ -51,7 +53,8 @@ type Spec struct {
 
   TaskResolvers   *TaskResolver
 
-  Running bool
+  running   atomic.Bool
+  cancelled atomic.Bool
 
   Tasks              *Task
   CurrentTask        *Task
@@ -97,12 +100,11 @@ func NewSpec (name string, spec_url *url.URL) *Spec {
     Subspecs:            make( map[string]*Spec        ),
     OutputChannels:      make( [] *chan *Asset,       0),
     OutputGroups:        make( [] *sync.WaitGroup,    0),
-    assets_chan:          make( chan *Asset,        1024),
+    assets_chan:         make( chan *Asset             ),
     PathTransformations: make( []*PathTransformation, 0),
     SpecBuilders:        make( [] SpecBuilder,        0),
     Props:               make( SpecProps               ),
     asset_frames:        make( map[string]*AssetFrame  ),
-    asset_frames_chan:   make( chan *AssetFrame        ),
   }
 
   spec.Root = &spec
@@ -190,12 +192,23 @@ func (sp *Spec) AddOutputSpec (out *Spec) {
 }
 
 
-func (sp *Spec) Done () {
+func (sp *Spec) done () {
+  sp.asset_frames_lock.Lock()
+  sp.assets_cond.L.Lock()
+
+  defer sp.asset_frames_lock.Unlock()
+  defer sp.assets_cond.L.Unlock()
+
   for _, output_group := range sp.OutputGroups {
     output_group.Done()
   }
 
-  sp.Running = false
+  sp.asset_frames_expect = 0
+  sp.assets_done = true
+  sp.asset_frames_cond.Broadcast()
+  sp.assets_cond.Broadcast()
+
+  sp.running.Store(false)
 }
 
 
@@ -217,20 +230,39 @@ func (s *Spec) Println (a ...any) (n int, err error) {
 }
 
 
+func (sp *Spec) IsRunning () bool {
+  return sp.running.Load()
+}
+
+
+func (sp *Spec) IsCancelled () bool {
+  return sp.cancelled.Load()
+}
+
+
 func (sp *Spec) Run () error {
+  var ctx = context.Background()
+  return sp.RunContext(ctx)
+}
+
+
+func (sp *Spec) RunContext (parent context.Context) error {
+  var ctx, ctxCauseFunc = context.WithCancelCause(parent)
+
   // Only run the Spec if is not already running.
   //
   sp.task_queue_lock.Lock()
-  if sp.Running {
+  if sp.running.Load() {
     sp.task_queue_lock.Unlock()
     return fmt.Errorf("Spec with name \"%s\" is already running", sp.Name)
   }
-  sp.Running = true
+
+  sp.running.Store(true)  // Unset by sp.done()
   sp.task_queue_lock.Unlock()
 
   sp.Printf("[%s] Running\n", sp.Name)
   defer sp.Printf("[%s] Exit\n", sp.Name)
-  defer sp.Done()
+  defer sp.done()
 
   // Initialize Spec AssetFrame
   //
@@ -239,32 +271,27 @@ func (sp *Spec) Run () error {
     assets: make(map[string]*AssetFrameEntry),
   }
 
-  var num_subspecs = len(sp.Subspecs)
-
-  // Error and cancel channels. These are buffered with the
-  // number of subspecs, because sending to an unbuffered channel
-  // blocks, which can prevent the goroutines of subspecs from
-  // exiting if they are trying to send an error.
+  // AssetFrame input synchronization
   //
-  var error_chan       = make(chan error, num_subspecs)
-  var cancel_task_chan = make(chan bool,  num_subspecs)
+  sp.asset_frames_chan = make(chan *AssetFrame, sp.asset_frames_expect)
 
-  // AssetFrame input synchonization
-  //
   if sp.asset_frames_expect > 0 {
-    go sp.runAssetFrameRelayBroadcast()
+    go sp.runAssetFrameRelayBroadcast(ctx)
   }
 
   // Receive Assets from inputs
   //
-  go func () {
-    go sp.runAssetChanRecv()
-  }()
+  go sp.runAssetChanRecv(ctx)
 
   // Run subspecs in parallel goroutines
   //
+  // Error channel. This is buffered with the number of subspecs,
+  // because sending to an unbuffered channel blocks execution,
+  // which can prevent the goroutines of subspecs from exiting if
+  // they are trying to send an error.
+  //
   for _, subspec := range sp.Subspecs {
-    go sp.runSubspec(subspec, error_chan, cancel_task_chan)
+    go sp.runSubspecContext(ctx, subspec, ctxCauseFunc)
   }
 
   // When all subspecs have finished running, close this spec's
@@ -273,6 +300,7 @@ func (sp *Spec) Run () error {
   go func () {
     sp.InputGroup.Wait()
     close(sp.assets_chan)
+    close(sp.asset_frames_chan)
   }()
 
   //
@@ -286,12 +314,14 @@ func (sp *Spec) Run () error {
 
   TASK_LOOP:
   for task != nil {
-    select {
-    default:
-      // pass
-    case <-cancel_task_chan:
-      // TODO: instead of cancelling the task loop, perhaps this should skip to deferred tasks to allow cleanup tasks.
+    if sp.IsCancelled() {
       break TASK_LOOP
+    }
+
+    select {
+    case <-ctx.Done():
+      break TASK_LOOP
+    default:
     }
 
     // Check there's a valid task queue, going forward
@@ -316,34 +346,62 @@ func (sp *Spec) Run () error {
       return err
     }
 
+    //
     // Run the Task Func
     //
+
     if task.ResolverId == "" {
       sp.Printf("[%s] task: %s\n", sp.Name, task.Name)
     } else {
       sp.Printf("[%s] task: %s (%s)\n", sp.Name, task.Name, task.ResolverId)
     }
 
-    task.CancelChan = cancel_task_chan  // Pass by reference
     sp.task_queue_lock.Unlock()
 
-    if err := task.Run(sp); err != nil {
+    if task_err := task.Run(sp); task_err != nil {
+      var err error
+
       if task.ResolverId != "" {
-        return fmt.Errorf(
+        err = fmt.Errorf(
           "Error in spec %s, in task %s (%s): %w\n",
-          sp.Name, task.Name, task.ResolverId, err,
+          sp.Name, task.Name, task.ResolverId, task_err,
         )
       } else {
-        return fmt.Errorf(
+        err =  fmt.Errorf(
           "Error in spec %s, in task %s: %w\n",
-          sp.Name, task.Name, err,
+          sp.Name, task.Name, task_err,
         )
       }
+
+      sp.cancelled.Store(true)
+      ctxCauseFunc(err)
+      return err
+    }
+
+    select {
+    case <-ctx.Done():
+      break TASK_LOOP
+    default:
     }
 
     sp.task_queue_lock.Lock()
-    task.CancelChan = nil
-    task.Assets     = nil // Let un-emitted assets get freed
+
+    var num_assets = task.num_assets_received + task.num_assets_generated
+    
+    if num_assets > task.num_assets_emitted {
+      if ! TaskMaskContains(task.Mask, TASK_ASSETS_FILTER) {
+        defer sp.task_queue_lock.Unlock()
+
+        var err error = fmt.Errorf(
+          "Error in Spec %s, Task %s cannot filter assets, but it emitted fewer assets than it recieved or generated (mask: %04O)",
+          sp.Name, task.Name, task.Mask,
+        )
+
+        sp.cancelled.Store(true)
+        ctxCauseFunc(err)
+        return err
+      }
+    }
 
     // Flush the push queue and advance to the next task. Merge
     // the internal asset buffer into the next task.
@@ -352,92 +410,89 @@ func (sp *Spec) Run () error {
     //
     sp.flushTaskPushQueue()
 
-    // If this is the last task, release the
-    // Spec's AssetFrame to all outputs.
-    //
-    if sp.AssetFrame != nil && task.Next == nil {
-      for _, out_spec := range sp.OutputSpecs {
-        out_spec.asset_frames_chan <- sp.AssetFrame
-      }
-      sp.AssetFrame = nil
-    }
+    task.Assets = nil // Let un-emitted assets get freed
 
     task           = task.Next
     sp.CurrentTask = task
     sp.task_queue_lock.Unlock()
   }
 
-  // Consume remaining input assets and subspec errors:
-  // there are no tasks left, but there may be input channel
-  // assets remaining, or subspecs may have emitted errors. 
+  // Release the spec's asset frame
   //
-  // The execution of this loop is implicitly tied to the
-  // execution of subspecs; subspecs have their parents as output
-  // WaitGroups, and their completion progresses the WaitGroup
-  // this parent spec uses. When a subspec of this Spec finishes
-  // (and calls Done()), this spec's WaitGroup is de-incremented.
-  // Meanwhile, this Spec's Run method has spawned a goroutine to
-  // close the input channel once the InputGroup WaitGroup is
-  // Done, in turn causing the asset consumption in the loop
-  // below to finish.
-
-  CONSUME_INPUT_AND_ERRORS:
-  for {
+  ASSET_FRAME_OUTPUT_LOOP:
+  for _, out_spec := range sp.OutputSpecs {
     select {
-    case err := <-error_chan:
-      sp.Println(err)
-      return err
-
-    case asset, ok := <-sp.assets_chan:
-      if ok == false {
-        // Subspecs may have finished executing, but they may
-        // still be sending an error. Wait a tiny bit before
-        // closing the error channel.
-        //
-        time.Sleep(5 * time.Millisecond)
-        close(error_chan)
-        break CONSUME_INPUT_AND_ERRORS
-      }
-
-      if err := sp.EmitAsset(asset); err != nil {
-        return err
-      }
+    case <-ctx.Done():
+      break ASSET_FRAME_OUTPUT_LOOP
+    case out_spec.asset_frames_chan <- sp.AssetFrame:
     }
   }
+  sp.AssetFrame = nil
 
-  close(sp.asset_frames_chan)
-
-  if err := <- error_chan; err != nil {
-    return err
+  if err := context.Cause(ctx); err != nil {
+    return fmt.Errorf("Cancel spec %v: %w", sp.Url, err)
   }
-
   return nil
 }
 
 
-func (sp *Spec) runAssetFrameRelayBroadcast () {
-  for asset_frame := range sp.asset_frames_chan {
-    sp.asset_frames_lock.Lock()
-    sp.asset_frames[asset_frame.Spec.Name] = asset_frame
-    sp.asset_frames_have++
-    sp.asset_frames_cond.Broadcast()
-    sp.asset_frames_lock.Unlock()
-  }
+func (sp *Spec) runAssetFrameRelayBroadcast (ctx context.Context) {
+  for { select {
+    case asset_frame, ok := <-sp.asset_frames_chan:
+      if !ok {
+        sp.asset_frames_cond.L.Lock()
+        sp.asset_frames_cond.Broadcast()
+        sp.asset_frames_cond.L.Unlock()
+        return
+      }
+
+      sp.asset_frames_cond.L.Lock()
+      sp.asset_frames[asset_frame.Spec.Name] = asset_frame
+      sp.asset_frames_have++
+      sp.asset_frames_cond.Broadcast()
+
+      if sp.asset_frames_have >= sp.asset_frames_expect {
+        sp.asset_frames_cond.L.Unlock()
+        return
+      }
+
+      sp.asset_frames_cond.L.Unlock()
+
+    case <-ctx.Done():
+      sp.asset_frames_cond.L.Lock()
+      sp.asset_frames_expect = 0
+      sp.asset_frames_cond.Broadcast()
+      sp.asset_frames_cond.L.Unlock()
+      return
+  }}
 }
 
 
-func (sp *Spec) runAssetChanRecv () {
-  for asset := range sp.assets_chan {
-    sp.assets_cond.L.Lock()
-    sp.assets_input = append(sp.assets_input, asset)
-    sp.assets_cond.Broadcast()
-    sp.assets_cond.L.Unlock()
-  }
+func (sp *Spec) runAssetChanRecv (ctx context.Context) {
+  OUTER:
+  for { select {
+    case asset, ok := <-sp.assets_chan:
+      if !ok {
+        break OUTER
+      }
+
+      sp.assets_cond.L.Lock()
+      sp.asset_frame_lock.Lock()
+      sp.AssetFrame.AddKey(asset.Url.Path)
+      sp.asset_frame_lock.Unlock()
+      sp.assets_input = append(sp.assets_input, asset)
+      sp.assets_cond.Broadcast()
+      sp.assets_cond.L.Unlock()
+
+    case <-ctx.Done():
+      break OUTER
+  }}
 
   // With the assets input channel closed, perform one more
   // broadcast to let all Asset awaits to get a nil Asset for
   // signaling closing.
   //
+
   sp.assets_cond.L.Lock()
   sp.assets_done = true
   sp.assets_cond.Broadcast()
@@ -445,33 +500,44 @@ func (sp *Spec) runAssetChanRecv () {
 }
 
 
-func (sp *Spec) runSubspec(subspec *Spec, error_chan chan error, cancel_task_chan chan bool) error {
-  if err := subspec.Run(); err != nil {
+func (sp *Spec) runSubspecContext (ctx context.Context, subspec *Spec, cancel context.CancelCauseFunc) error {
+  if err := subspec.RunContext(ctx); err != nil {
     var wrapped_error = fmt.Errorf(
         "Error in subspec \"%s\": %w", subspec.Name, err,
       )
 
-    if error_chan != nil {
-      error_chan <- wrapped_error
-    }
-
-    if cancel_task_chan != nil {
-      cancel_task_chan <- true
-    }
-
+    sp.cancelled.Store(true)
+    cancel(wrapped_error)
     return wrapped_error
   }
   return nil
 }
 
 func (sp *Spec) AwaitInputAssetNumber (number int) *Asset {
+  if number < 0 {
+    return nil
+  }
+
   sp.assets_cond.L.Lock()
   defer sp.assets_cond.L.Unlock()
 
-  for number >= len(sp.assets_input) {
-    if sp.assets_done {
+  if sp.assets_done {
+    if number >= len(sp.assets_input) {
       return nil
     }
+
+    return sp.assets_input[number]
+  }
+
+  for number >= len(sp.assets_input) {
+    if sp.assets_done {
+      break
+    }
+
+    if sp.IsCancelled() || !sp.IsRunning() {
+      break
+    }
+
     sp.assets_cond.Wait()
   }
 

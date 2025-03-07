@@ -36,6 +36,7 @@ const (
   TASK_ASSETS_FROM_SPECS   uint64 = 0b_000_010_000_001  // Task relies on Assets from input Specs
   TASK_ASSETS_FROM_TASKS   uint64 = 0b_000_100_000_001  // Task relies on Assets from previous Tasks
 
+  // TODO: task mask which distinguishes tasks that emit fewer assets than they receive, and tasks which emit NO assets
   TASK_ASSETS_FILTER       uint64 = 0b_000_001_010_001  // Task may not emit all Assets it consumes
   TASK_ASSETS_MUTATE       uint64 = 0b_000_001_100_001  // Task changes the content of existing assets
 
@@ -96,7 +97,7 @@ type Task struct {
   //
   Mask uint64
 
-  Assets      []*Asset
+  Assets []*Asset
 
   num_assets_received  int
   num_assets_emitted   int
@@ -119,9 +120,6 @@ type Task struct {
   // queue.
   //
   MapFunc TaskMapFunc
-
-  // TODO: deprecate, replace with methods
-  CancelChan chan bool
 
   /*
     Asset matching: used in conjunction with a MapFunc, the
@@ -346,7 +344,7 @@ func (sp *Spec) EnqueueTask (tk *Task) error {
   sp.task_queue_lock.Lock()
   defer sp.task_queue_lock.Unlock()
 
-  if sp.Running {
+  if sp.IsRunning() {
     return fmt.Errorf("Spec \"%s\" cannot enqueue tasks while it is running", sp.Name)
   }
 
@@ -441,7 +439,7 @@ func (sp *Spec) DeferTask (tk *Task) error {
   sp.task_queue_lock.Lock()
   defer sp.task_queue_lock.Unlock()
 
-  if sp.Running {
+  if sp.IsRunning() {
     return fmt.Errorf("Spec \"%s\" cannot defer tasks while it is running", sp.Name)
   }
 
@@ -524,7 +522,7 @@ func (sp *Spec) PushTask (tk *Task) error {
   sp.task_queue_lock.Lock()
   defer sp.task_queue_lock.Unlock()
 
-  if sp.Running {
+  if sp.IsRunning() {
     return fmt.Errorf("Spec \"%s\" cannot push tasks while it is running", sp.Name)
   }
 
@@ -666,8 +664,8 @@ func (tk *Task) EmitAsset (asset *Asset) error {
   if spec.AssetFrame.HasKey(asset.Url.Path) == false {
     if TaskMaskContains(tk.Mask, TASK_ASSETS_GENERATE) == false {
       return fmt.Errorf(
-        "Task cannot emit asset with new URL, Task.Mask states it cannot generate Assets (mask: %O)",
-        tk.Mask,
+        "Task cannot emit asset with new URL path \"%s\", Task.Mask states it cannot generate Assets (mask: %O)",
+        asset.Url.Path, tk.Mask,
       )
     }
 
@@ -704,6 +702,20 @@ func (tk *Task) EmitAsset (asset *Asset) error {
   // to go is being emitted by the Spec. Do so if it exists.
   //
   if next == nil {
+    if asset.IsMulti() {
+      if assets, err := asset.Flatten(); err != nil {
+        return err
+      } else {
+        for _, flattened_asset := range assets {
+          if err := tk.EmitAsset(flattened_asset); err != nil {
+            return err
+          }
+        }
+      }
+
+      return nil;
+    }
+
     if tk.Spec != nil {
       if err := tk.Spec.EmitAsset(asset); err != nil {
         return fmt.Errorf("Error in task %s emitting asset: %w", tk.Name, err)
@@ -841,6 +853,7 @@ func (tk *Task) AwaitInputAssetNext () (*Asset, error) {
     return nil, err
 
   } else if asset != nil {
+    // TODO: this is not a thread safe incrementation
     tk.spec_asset_number++
     return asset, nil
   }
@@ -918,7 +931,7 @@ func (tk *Task) ForwardAssets () error {
   //
   // TODO: the first task after this which receives assets is not necessarily tk.Next. This should read ahead for valid tasks, enabling more shortcutting of Assets.
   //
-  if tk.Next == nil || tk.Next.AcceptMultiAssets {
+  if tk.Next != nil && tk.Next.AcceptMultiAssets {
     asset := tk.Spec.MakeAsset("")
     asset.SetAssetArray(tk.Assets)
     return tk.EmitAsset(asset)

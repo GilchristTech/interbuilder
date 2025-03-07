@@ -86,22 +86,30 @@ func (tk *Task) AwaitAssetFrames () (map[string]*AssetFrame, error) {
   sp.asset_frames_cond.L.Lock()
   defer sp.asset_frames_cond.L.Unlock()
 
-  if sp.asset_frames_expect == 0 {
+  if sp.asset_frames_expect <= 0 {
     return nil, nil
   }
 
   for sp.asset_frames_have != sp.asset_frames_expect {
+    if sp.IsCancelled() {
+      return nil, nil
+    }
+
+    if sp.asset_frames_expect <= 0 {
+      return nil, nil
+    }
+
     if sp.asset_frames_have > sp.asset_frames_expect {
       return nil, fmt.Errorf(
         "Spec %s has more asset frames (%d) than it expects (%d).",
         sp.Name, sp.asset_frames_have, sp.asset_frames_expect,
       )
     }
+
     sp.asset_frames_cond.Wait()
   }
 
-  var asset_frames = sp.asset_frames
-  return asset_frames, nil
+  return sp.asset_frames, nil
 }
 
 

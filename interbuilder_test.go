@@ -179,25 +179,34 @@ func TestSpecTaskCancelledBySubspecError (t *testing.T) {
       } else if asset != nil {
         t.Fatalf("Spec received unexpected asset chunk: %v", asset)
       } else {
-        // Asset chunk is nil, which is correct
+        // Asset chunk is nil. In this test, the subspec should
+        // never emit an asset frame, and so this is the only
+        // valid condition within this task.
+        //
+        break
       }
     }
     return nil
   })
 
   subspec.EnqueueTaskFunc("error", func (s *Spec, tk *Task) error {
-    return fmt.Errorf("Expected error")
+    return fmt.Errorf("THIS IS THE EXPECTED ERROR")
   })
 
   TestWrapTimeout(t, func () {
-    if err := subspec.Run(); err == nil {
-      t.Fatal("Expected specs to error, but no error was returned")
+    if err := root.Run(); err == nil {
+      t.Error("Expected specs to error, but no error was returned")
     } else {
       error_str := fmt.Sprintf("%v", err)
-      if ! strings.Contains(error_str, "Expected error") {
-        t.Fatalf("Spec exited with an error, but it was not the expected error: %v", err)
+      if ! strings.Contains(error_str, "THIS IS THE EXPECTED ERROR") {
+        t.Errorf("Spec exited with an error, but it was not the expected error: %v", err)
       }
     }
+
+    if subspec.IsRunning()     { t.Errorf("Subspec is still running")    }
+    if root.IsRunning()        { t.Errorf("Root spec is still running")  }
+    if ! subspec.IsCancelled() { t.Errorf("Subspec was not cancelled")   }
+    if ! root.IsCancelled()    { t.Errorf("Root spec was not cancelled") }
   })
 }
 
@@ -380,6 +389,10 @@ func TestTaskPassAssetsToSpec (t *testing.T) {
   })
 
   subspec.EnqueueTaskFunc("mutate", func (s *Spec, tk *Task) error {
+    if len(tk.Assets) != 3 {
+      t.Error("Mutate task did not encounter three assets in Asset array")
+    }
+
     for _, asset := range tk.Assets {
       // Read and modify the content of the asset
       content, err := asset.GetContentBytes()
@@ -387,6 +400,7 @@ func TestTaskPassAssetsToSpec (t *testing.T) {
       asset.SetContentBytes( []byte("modified " + string(content)) )
 
       tk.Println(asset.Url)
+      // tk.EmitAsset(asset)
     }
     return nil
   })
@@ -428,6 +442,7 @@ func TestTaskPassAssetsToSpec (t *testing.T) {
   })
 
   if err := root.Run(); err != nil {
+    PrintSpec(root)
     t.Fatal(err)
   }
 }

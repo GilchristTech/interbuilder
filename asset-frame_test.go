@@ -19,11 +19,13 @@ func TestAutomaticAssetFrames (t *testing.T) {
       var asset = sp.MakeAsset(fmt.Sprintf("%s/%d", tk.Name, n))
       asset.SetContentBytes([]byte("Hello, world!"))
 
+      tk.Println("Emitting asset", asset.Url.Path)
       if err := tk.EmitAsset(asset); err != nil {
         return err
       }
     }
 
+    tk.Println("Finished emitting assets. Next task:", tk.Next)
     return nil
   }
 
@@ -49,6 +51,7 @@ func TestAutomaticAssetFrames (t *testing.T) {
   })
 
   if err := root.Run(); err != nil {
+    t.Log("WAT")
     t.Fatal(err)
   }
 }
