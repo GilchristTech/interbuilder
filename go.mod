@@ -6,6 +6,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/tdewolff/parse/v2 v2.7.16
 	golang.org/x/net v0.28.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

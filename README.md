@@ -58,8 +58,9 @@ interbuilder assets --input - \
 
 ## Spec JSON Properties (Props)
 
-Build specifications can be defined in JSON. Interbuilder uses
-these to build a pipeline, prior to running. 
+Build specifications can be defined in JSON or YAML. Interbuilder
+uses these to build a concurrent process and file pipeline prior
+to running. 
 
 ### `example.spec.json`
 ```json
@@ -83,7 +84,23 @@ these to build a pipeline, prior to running.
 }
 ```
 
-When ran with `interbuilder run example.spec.json`, this would do
+Alternatively, you may find it cleaner easier to write this in YAML:
+```YAML
+source_nest: build
+subspecs:
+  site-a:
+    source: "git://example.com/my-nodejs-static-site"
+    transform:
+      prefix: join-this-onto-all-url-paths
+
+  site-b:
+    source: "git://example.com/other-nodejs-static-site"
+    transform:
+      prefix: this-site-has-its-urls-on-a-different-path
+```
+
+When ran with `interbuilder run example.spec.json` (the spec file
+format is inferred by the file extension), this would do
 the following, in parallel:
   * Clone two git repositories*
   * Detect they are NodeJS packages
@@ -94,7 +111,7 @@ the following, in parallel:
   * Combine the two file trees together, forming a new static
     site.
 
-&ast;Tasks which download use a mutex lock so they will run in series
+&ast;Tasks which download use a mutex lock so they will run in series.
 
 ## Prop reference
 

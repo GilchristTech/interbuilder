@@ -1,0 +1,14 @@
+name: root
+source_nest: build
+
+subspecs:
+  imposition:
+    source: "git://github.com/GilchristTech/web-imposition"
+    install_cmd: npm i
+    transform:
+      prefix: imposition
+
+  comic:
+    source: "git://github.com/GilchristTech/spacehouse-website"
+    transform:
+      prefix: comic

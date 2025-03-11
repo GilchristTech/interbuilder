@@ -7,7 +7,9 @@ import (
 
   "fmt"
   "os"
+  "path"
   "encoding/json"
+  "gopkg.in/yaml.v3"
 )
 
 
@@ -49,7 +51,9 @@ var cmd_run = & cobra.Command {
       }()
     }
 
-    // Load spec configuration from file
+    // Load spec configuration from file - read the file's bytes
+    // and infer how to unmarshal it from the file extension.
+    // TODO: add CLI flag for specifying the format of a spec file. This would allow an input of "-" to specify a on-default format build spec from STDIN, or input from a file with no extension.
     //
     specs_bytes, err := os.ReadFile(spec_file)
     if err != nil {
@@ -57,9 +61,24 @@ var cmd_run = & cobra.Command {
       os.Exit(1)
     }
 
-    if err := json.Unmarshal(specs_bytes, &root.Props); err != nil {
-      fmt.Printf("Could not parse spec json file: %v\n", err)
+    switch extension := path.Ext(spec_file); extension {
+    default:
+      fmt.Printf("Unknown spec file format: %s\n", extension)
       os.Exit(1)
+
+    case ".json":
+      if err := json.Unmarshal(specs_bytes, &root.Props); err != nil {
+        fmt.Printf("Could not parse spec JSON file: %v\n", err)
+        os.Exit(1)
+      }
+
+    case ".yaml":
+      var props = make(map[string]any)
+      if err := yaml.Unmarshal(specs_bytes, props); err != nil {
+        fmt.Printf("Could not parse spec YAML file: %v\n", err)
+        os.Exit(1)
+      }
+      root.Props = props
     }
 
     // Create tasks for outputs

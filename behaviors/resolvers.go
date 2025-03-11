@@ -17,7 +17,7 @@ func ResolveSubspecs (s *Spec) error {
   }
 
   if ok == false {
-    return fmt.Errorf("Subspecs prop expects a JSON object, got %T", s.Props["subspecs"])
+    return fmt.Errorf("Subspecs prop expects a JSON-style object, got %T", s.Props["subspecs"])
   }
 
   subspecs := make([]*Spec, len(subspecs_json))
