@@ -1,7 +1,7 @@
 package behaviors
 
 import (
-  . "gilchrist.tech/interbuilder"
+  . "github.com/GilchristTech/interbuilder"
   "fmt"
 )
 

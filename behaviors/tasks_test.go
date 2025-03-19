@@ -2,7 +2,7 @@ package behaviors
 
 import (
   "testing"
-  . "gilchrist.tech/interbuilder"
+  . "github.com/GilchristTech/interbuilder"
 
   "strings"
 

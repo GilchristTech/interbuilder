@@ -1,4 +1,4 @@
-module gilchrist.tech/interbuilder
+module github.com/GilchristTech/interbuilder
 
 go 1.22.4
 

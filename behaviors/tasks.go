@@ -2,7 +2,7 @@ package behaviors
 
 import (
   "fmt"
-  . "gilchrist.tech/interbuilder"
+  . "github.com/GilchristTech/interbuilder"
   "sync"
   "path"
   "path/filepath"

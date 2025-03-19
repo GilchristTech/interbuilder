@@ -1,8 +1,8 @@
 package main
 
 import (
-  . "gilchrist.tech/interbuilder"
-  "gilchrist.tech/interbuilder/behaviors"
+  . "github.com/GilchristTech/interbuilder"
+  "github.com/GilchristTech/interbuilder/behaviors"
 
   "github.com/spf13/cobra"
 

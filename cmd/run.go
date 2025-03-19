@@ -1,7 +1,7 @@
 package main
 
 import (
-  . "gilchrist.tech/interbuilder"
+  . "github.com/GilchristTech/interbuilder"
 
   "github.com/spf13/cobra"
 

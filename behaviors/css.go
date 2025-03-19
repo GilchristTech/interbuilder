@@ -1,7 +1,7 @@
 package behaviors
 
 import (
-  . "gilchrist.tech/interbuilder"
+  . "github.com/GilchristTech/interbuilder"
   "github.com/tdewolff/parse/v2"
   "github.com/tdewolff/parse/v2/css"
 
