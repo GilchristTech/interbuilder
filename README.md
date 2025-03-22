@@ -1,62 +1,40 @@
 # Interbuilder: Declarative Build Pipelining
 
-Interbuilder is a declarative workflow and build pipeline tool,
-intended for use with static web assets and the programs that
-generate them.
+Interbuilder is a workflow and build pipeline tool for static web
+assets and the programs which generate them. It parallelizes
+programs which write files, such as static site generators, and
+sends their output through a concurrent pipeline to merge their
+file trees and update content where files link to each other.
+If the URLs of any HTML or CSS files are changed, the content of
+the files containing these references are updated to point at the
+new URL values.
+
+It consists of a command-line program, expression syntax, schemas
+in formats like JSON, Go modules with specific data and
+concurrency structures, and more.  This `README` is an overview
+of the repository itself, along with brief usage notes for
+the CLI user. For more specific information, see [the
+documentation](./docs/README.md) and the `docs/` directory in
+this repository.
 
 This software's initial version is still in development.
 
-This repository contains the core Interbuilder package in the
-repository's root, the behaviors package in the `behaviors`
-directory, and the CLI package in the `cmd` directory. 
+## Compiling the CLI
 
-## CLI Usage
-
-Depending on the subcommand used, the Interbuilder CLI can run
-existing build specifications, and create simple asset pipelines.
-
-### `interbuilder run`: Run a build specification file
-
-### `interbuilder assets`: Run simple asset pipelines
-
-### Controlling asset outputs
-
-Wherever asset outputs are able to be specified in the CLI, they
-can be preceded with any number of arguments which change the
-asset format and filtering. By default, an output will receive
-all assets from the root spec in the form of JSON, with content
-encoded in plain or base64 encoded strings, along with asset URLs
-and MIME types. The format can be controlled with a positional
-argument starting with `format:`, followed by a comma-separated
-list of tags which control what to include in the formatting.
-This default behavior can be manually-specified like so:
-
+Interbuilder uses a Makefile to manage its compilation. To
+compile the CLI, run:
 ```bash
-interbuilder run example.spec.json \
-  format:json,url,mimetype,string,base64 assets.json
+git clone https://github.com/GilchristTech/interbuilder
+cd interbuilder/
+make
 ```
+This will produce an executable called `interbuilder`. It can be
+installed by putting the binary somewhere in your `PATH`.
 
-These these can be enabled with the shorthand tag, `default`, and
-then those tags can be disabled by prefixing them with `no-`.
-Also, the format can be set from `json` to `text`. For example:
+## Spec files
 
-```bash
-interbuilder assets --input assets.json \
-  format:default,text,no-string,no-mimetype output.json
-```
-
-Asset outputs can also be filtered using a similar syntax. For
-example, to define two outputs, one which takes assets with a
-file extension of `.html` and another output which takes all
-pictures from a path with a path prefix of `/static/`, one could
-use the following:
-```bash
-interbuilder assets --input - \
-  filter:extension=html html-assets.json \
-  filter:prefix=/static/,mime=picture/ static-picture-assets.json
-```
-
-## Spec JSON Properties (Props)
+For information on Specs and Spec files, see the [Spec
+documentation](./docs/specs.md)
 
 Build specifications can be defined in JSON or YAML. Interbuilder
 uses these to build a concurrent process and file pipeline prior
@@ -84,9 +62,12 @@ to running.
 }
 ```
 
-Alternatively, you may find it cleaner easier to write this in YAML:
+Alternatively, you may find it cleaner and easier to write this in YAML:
+
+### `example.spec.yaml`
 ```YAML
 source_nest: build
+
 subspecs:
   site-a:
     source: "git://example.com/my-nodejs-static-site"
@@ -113,102 +94,77 @@ the following, in parallel:
 
 &ast;Tasks which download use a mutex lock so they will run in series.
 
-## Prop reference
+## CLI Usage
 
-The following properties are directly used and recognized by the
-Interbuilder core:
+For information on CLI usage, see
+[CLI documentation](./docs/cli.md)
+or run `interbuilder [command] help`. 
 
-* `source_dir`: A working directory for system commands and
-                relative file paths.
-
-* `quiet`:      Prevent this spec and its children from writing
-                to STDOUT.
-
-Interbuilder's default behavior set recognizes the following
-properties:
-
-* `subspecs`: A dictionary of spec names to spec prop objects.
-              Used to construct a nested spec pipeline.
-
-* `source`
-* `source_nest`
-* `install_cmd`
-
-* `transform`: Perform a transformation on the URLs of assets.
-  This can be used to rearrange static site file structures.
-  These transformations also get applied to URL paths inside HTML
-  and CSS content. 
-
-  A transformation is expressed as a JSON object with the
-  following attributes:
-  - `prefix`: Join a URL path to the beginning of each matching URL.
-  - `match`
-  - `find`
-  - `replace`
-
-## Compilation, running, and tests:
-
-Most actions related to compilation and testing are defined in
-the `Makefile`. This Makefile also tracks dependencies as a
-target, and therefore dependencies are installed automatically,
-but dependencies can be manually installed by running `make
-deps`.
-
-To compile the CLI, run any of the following:
+Interbuilder is primarily intended to be used as a CLI tool.
+Build specs, as demonstrated above, are able to be ran with the
+CLI binary:
 ```bash
-make
-make build
-make cli
-```
-This will produce an executable called `interbuilder`.
-
-To run tests:
-```
-make test
+interbuilder run myspec.spec.yaml
 ```
 
-If developing, tests can be live-updated with `make test-watch`,
-and test coverage can be viewed with `make test-coverage` or
-`make test-coverage-browser`.
+When the Interbuilder CLI outputs a set of files, it can
+optionally encode them into a single line-delimited JSON file.
+This allows the CLI to work with named pipes:
 
-## Pipeline Concepts
+```bash
+mkfifo pipe
+interbuilder run spec.json pipe &
+interbuilder assets --input pipe output.json
+```
+Asset outputs can be filtered. For example, to define two
+outputs, one which takes assets with a file extension of `.html`
+and another output which takes all pictures from a path with a
+path prefix of `/static/`, one could use the following:
+```bash
+interbuilder assets --input - \
+  filter:extension=html html-assets.json \
+  filter:prefix=/static/,mime=picture/ static-picture-assets.json
+```
 
-For the user, an Interbuilder pipeline is meant to be defined in
-a short JSON file. This is meant to unburden the user with managing the pipeline and every particular of their build process when working at a high level.
+## Go modules
 
-### Build Specifications (Specs)
-  Interbuilder organizes data pipelines into a tree of Specs
-  running in parallel. Each Spec runs a serial list of Tasks, and
-  Tasks can tell the Spec to emit Assets as output, usually to
-  the Spec's parent.
+In addition to being a CLI tool, Interbuilder can also be used as
+a Go concurrency module. For more information, see [the module
+documentation](./docs/module.md), or run `go doc
+github.com/GilchristTech/interbuilder`. 
 
-### Spec Properties (Props)
-  Each Spec contains a typically user-defined JSON-like data
-  structure for holding metadata and hints or instructions of
-  which tasks are to be executed.  Tasks, Asset callback
-  functions, SpecBuilders, TaskResolvers, and Tasks read from
-  these as a configuration data structure.
+There are three modules, the core module in the root of this
+repository, the `behaviors` module which contains spec file
+processing and features, and the `cmd` module for the CLI.
 
-### Tasks
-  While Specs are ran in parallel, within each Spec is a
-  serially-ran queue of Tasks. Each task can change what comes
-  later in the task queue.
-  
-### Assets
-  An asset represents one or more things which gets passed
-  through the pipeline. Usually, these represent files or sets of
-  files. An asset can be singular and readable, or pluralistic
-  and expandable into more assets.
+## Repository layout
 
-### Interbuilder URLs (ib://)
-  Interbuilder uses URLs with the `ib://` scheme to denote
-  different resources internally.
+This repository contains the core Interbuilder package in the
+repository's root, the behaviors package in the `behaviors`
+directory, and the command-line package in the `cmd` directory. 
 
-### Prop Resolution (SpecBuilders)
+The Go module in this repository's root directory is the core
+Interbuilder module. This defines the concurrency structure for
+Interbuilder inside Specs, Tasks, and Assets, among other things.
 
-### Task Resolution and Handlers (TaskResolvers)
+The `behaviors/` directory contains more implementation-specific
+functionality, including the processing of JSON structures in
+spec files. For example, if the JSON property `"source":
+"git://example.com/repo.git"` defines a SpecBuilder to interpret
+that data into a the Spec's Props and enqueue a Task to download
+the repository and infer what further tasks to run, based on its
+contents.
 
-### Path Transformations
-  Each Spec has an optional array of path transformations, which
-  apply a change to the URL path of each asset emmited. Tasks can
-  read these path transformations
+The `cmd/` directory defines the main function entrypoint for the
+command-line interface of Interbuilder. It handles argument
+parsing, and constructing pipelines based on user-specified
+arguments.
+
+The `docs/` directory contains Interbuilder documentation,
+written in Markdown. Currently, there is no build process for
+generating a website based off these. This documentation does not
+cover individual data structures, functions, or methods defined
+in Go, and for that, `go doc` is more appropriate or.
+
+Finally, the `examples/` directory contains examples
+demonstrating Interbuilder usage.
