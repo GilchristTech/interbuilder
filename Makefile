@@ -29,7 +29,7 @@ $(DEPS_CHECK): go.mod go.sum
 	touch $(DEPS_CHECK)
 
 test: $(DEPS_CHECK) $(MODULE_SRC)
-	go test ./ ./behaviors/ $(TEST_ARGS)
+	go test ./ ./behaviors/ ./cmd/ $(TEST_ARGS)
 test-watch:
 	$(WATCHER) 'make && make test || exit 1'
 

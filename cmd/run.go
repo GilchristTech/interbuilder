@@ -86,7 +86,9 @@ var cmd_run = & cobra.Command {
     for output_i, output_definition := range output_definitions {
       var task_name = fmt.Sprintf("cli-output-%d", output_i)
       if err := output_definition.EnqueueTasks(task_name, root); err != nil {
-        fmt.Println("Error while creating creating output tasks:\n\t%v\n", err)
+        fmt.Printf(
+          "Error while creating creating output tasks:\n\t%v\n", err,
+        )
         os.Exit(1)
       }
     }

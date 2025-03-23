@@ -345,7 +345,7 @@ var cmd_assets = & cobra.Command {
       var spec_name string = fmt.Sprintf("cli-output-%d", output_i)
 
       if output_spec, err := output_definition.MakeSpec(spec_name); err != nil {
-        fmt.Println("Error while making output spec from arguments in output %d:\n%v\n", output_i, err)
+        fmt.Printf("Error while making output spec from arguments in output %d:\n%v\n", output_i, err)
         os.Exit(1)
       } else {
         root.AddSubspec(output_spec)
@@ -402,7 +402,10 @@ var cmd_assets = & cobra.Command {
         }
 
         if err := input_spec.DeferTask(close_task); err != nil {
-          fmt.Println("Error while deferring CLI read-assets-close task queue in Spec with name \"%s\":\n%v", spec_name, err)
+          fmt.Printf(
+            "Error while deferring CLI read-assets-close task queue in Spec with name \"%s\":\n%v\n",
+            spec_name, err,
+          )
           os.Exit(1)
         }
 

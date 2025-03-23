@@ -278,6 +278,10 @@ func (od *cliOutputDefinition) SetEncodingField (field_name string) error {
 }
 
 
+/*
+  parseOutputArgs takes a slice of CLI argument strings and
+  converts them into a slice of cliOutputDefinitions.
+*/
 func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
   // Outputs definitions are built in-place within this array,
   // and the last element, an incomplete definition, is truncated
@@ -298,31 +302,46 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
     var rgx_match_section = regexp.MustCompile(`^\s*(\w+)\s*:`)
     var section_match     = rgx_match_section.FindStringSubmatch(arg)
 
-    var section string = "output"
+    var (
+      is_format_expression,
+      is_filter_expression,
+      is_transform_expression,
+      is_expression,
+      is_destination bool
+    )
 
     if section_match != nil {
       switch matched_section := section_match[1]; matched_section {
-      case "format", "filter":
-        section = matched_section
+      case "format":
+        is_format_expression    = true
+        is_expression           = true
+      case "filter":
+        is_filter_expression    = true
+        is_expression           = true
+      case "transform":
+        is_transform_expression = true
+        is_expression           = true
       default:
-        return nil, fmt.Errorf(`Error parsing argument, unknown section "%w"`, matched_section)
+        return nil, fmt.Errorf("Unrecognized expression section in argument %d: %s", arg_i, matched_section)
       }
+    } else {
+      is_destination = true
     }
-
-    var is_format      bool = section == "format"
-    var is_filter      bool = section == "filter"
-    var is_destination bool = !is_format && !is_filter
 
     var section_node *ExpressionNode = nil
 
     // If this argument is an output expression, parse it
     //
-    if is_format || is_filter {
+    if is_expression {
       if nodes, err := ParseExpressionString(arg, false); err != nil {
         return nil, fmt.Errorf("Error parsing expression in argument %d: %w", arg_i+1, err)
 
       } else if expect, got := 1, len(nodes); expect != got {
-        return nil, fmt.Errorf("Argument %d contains %d sections, expected %d", arg_i, got, expect)
+        // TODO: it's probably fine to have multiple sections in a single argument string
+        return nil, fmt.Errorf(
+          "Argument %d contains %d sections, expected %d",
+          arg_i, got, expect,
+        )
 
       } else {
         var node = nodes[0]
@@ -330,15 +349,16 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
         if got, expect := node.NodeType, EXPRESSION_NODE_SECTION; got != expect {
           return nil, fmt.Errorf(
             "Argument %d expected to parse a section node of type %s, got %s",
-            expect, got,
+            arg_i, expect, got,
           )
         }
 
         section_node = node
       }
+
     }
 
-    if is_format {
+    if is_format_expression {
       for _, node := range section_node.Children {
         if node.Value.TokenType.IsValue() == false {
           return nil, fmt.Errorf("Error parsing format section, only values are expected, got an expression of type %s", node.NodeType)
@@ -353,12 +373,17 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
       // The next argument needs to be a destination
       expect_definition = true
 
-    } else if is_filter {
+    } else if is_filter_expression {
       if filters, err := interpretFilterExpressionSection(section_node); err != nil {
         return nil, err
       } else if len(filters) >= 1 {
         output_definition.Filters = append(output_definition.Filters, filters...)
       }
+
+    } else if is_transform_expression {
+
+      // TODO
+      return nil, fmt.Errorf("Transformation expressions not yet implemented")
 
     } else if is_destination {
       output_definition.Dest = arg
@@ -374,7 +399,7 @@ func parseOutputArgs (args []string) ([]cliOutputDefinition, error) {
       output_definition = & outputs[len(outputs)-1]
 
     } else {
-      panic("Argument is neither a format, filter, nor definition; this code should be unreachable")
+      panic("Argument is neither a format, filter, nor output; this code should be unreachable")
     }
   }
 
